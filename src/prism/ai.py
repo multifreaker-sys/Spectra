@@ -24,6 +24,7 @@ class CategorisedTransaction(BaseModel):
     amount: float
     currency: str
     date: str
+    recurring: bool = False
 
 
 # ── Prompt ───────────────────────────────────────────────────────
@@ -38,7 +39,10 @@ RULES:
 2. Assign a category from the list of existing categories if one fits.
 3. If no existing category fits, create a meaningful new one in English.
 4. If truly ambiguous, use the category "Other".
-5. Reply ONLY with a valid JSON array, no extra text.
+5. Set "recurring" to true if the transaction looks like a subscription or \
+   recurring payment (e.g. Netflix, Spotify, Apple, iCloud, gym memberships, \
+   insurance, phone plans, streaming services, SaaS). Otherwise set it to false.
+6. Reply ONLY with a valid JSON array, no extra text.
 
 OUTPUT FORMAT (JSON array):
 [
@@ -48,7 +52,8 @@ OUTPUT FORMAT (JSON array):
     "category": "<category>",
     "amount": <amount as number>,
     "currency": "<currency code>",
-    "date": "<YYYY-MM-DD>"
+    "date": "<YYYY-MM-DD>",
+    "recurring": <true or false>
   }
 ]
 """
@@ -200,10 +205,11 @@ def categorise(
                 CategorisedTransaction(
                     original_description=item.get("original", ""),
                     clean_name=item.get("clean_name", ""),
-                    category=item.get("category", "Altro"),
+                    category=item.get("category", "Other"),
                     amount=float(item.get("amount", 0)),
                     currency=item.get("currency", "EUR"),
                     date=item.get("date", ""),
+                    recurring=bool(item.get("recurring", False)),
                 )
             )
         except Exception:

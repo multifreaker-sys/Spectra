@@ -91,7 +91,8 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
             print(f"{'='*72}")
             for t in categorised:
                 sign = "+" if t.amount > 0 else ""
-                print(f"\n  {t.date}  {sign}{t.amount:.2f} {t.currency}")
+                recurring_tag = " 🔄" if t.recurring else ""
+                print(f"\n  {t.date}  {sign}{t.amount:.2f} {t.currency}{recurring_tag}")
                 print(f"  Original : {t.original_description}")
                 print(f"  Clean    : {t.clean_name}")
                 print(f"  Category : {t.category}")
