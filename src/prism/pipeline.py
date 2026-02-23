@@ -1,26 +1,37 @@
-"""Pipeline orchestrator — CSV → AI → Google Sheets."""
+"""Pipeline orchestrator — CSV/PDF → AI → Google Sheets."""
 
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from prism.ai import CategorisedTransaction, categorise
 from prism.config import Settings, load_settings
 from prism.csv_parser import ParsedTransaction, parse_csv
+from prism.dashboard import refresh_dashboard
 from prism.db import BookmarkDB
 from prism.sheets import SheetsClient
 
 logger = logging.getLogger("prism")
 
 
-def run(settings: Settings, csv_file: str, currency: str, dry_run: bool) -> None:
-    """Process a bank CSV export → AI → Google Sheets."""
+def _parse_file(file_path: str, currency: str) -> list[ParsedTransaction]:
+    """Auto-detect CSV or PDF and parse accordingly."""
+    ext = Path(file_path).suffix.lower()
+    if ext == ".pdf":
+        from prism.pdf_parser import parse_pdf
+        return parse_pdf(file_path, currency=currency)
+    else:
+        return parse_csv(file_path, currency=currency)
 
-    # ── Step 1: Parse CSV ────────────────────────────────────────
-    logger.info("📂 Reading CSV: %s", csv_file)
-    parsed = parse_csv(csv_file, currency=currency)
+def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
+    """Process a bank CSV or PDF export → AI → Google Sheets."""
+
+    ext = Path(file).suffix.upper()
+    logger.info("📂 Reading %s: %s", ext, file)
+    parsed = _parse_file(file, currency=currency)
 
     if not parsed:
         logger.info("✅ No transactions found in CSV")
@@ -91,6 +102,54 @@ def run(settings: Settings, csv_file: str, currency: str, dry_run: bool) -> None
             db.mark_seen_batch([t.id for t in new_txns])
             logger.info("✅ Done — %d rows written to Google Sheets", len(categorised))
 
+            # Refresh the Dashboard tab with updated charts
+            try:
+                refresh_dashboard(sheets)
+            except Exception:
+                logger.warning("Dashboard update failed — continuing", exc_info=True)
+
+
+def run_inbox(settings: Settings, inbox_dir: str, currency: str, dry_run: bool) -> None:
+    """Process ALL csv/pdf files in a folder, then move them to processed/."""
+    import shutil
+
+    inbox = Path(inbox_dir)
+    if not inbox.exists():
+        logger.info("📂 Inbox folder %s does not exist — nothing to do", inbox)
+        return
+
+    files = sorted(
+        list(inbox.glob("*.csv")) + list(inbox.glob("*.pdf"))
+    )
+    if not files:
+        logger.info("📂 No CSV/PDF files in %s — nothing to do", inbox)
+        return
+
+    # Create processed/ as sibling of inbox/
+    processed = inbox.parent / "processed"
+    processed.mkdir(exist_ok=True)
+
+    logger.info("📂 Found %d file(s) in %s", len(files), inbox)
+
+    for bank_file in files:
+        logger.info("─" * 40)
+        logger.info("Processing: %s", bank_file.name)
+        try:
+            run(settings, file=str(bank_file), currency=currency, dry_run=dry_run)
+
+            if not dry_run:
+                dest = processed / bank_file.name
+                if dest.exists():
+                    from datetime import datetime, timezone
+                    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    dest = processed / f"{bank_file.stem}_{ts}{bank_file.suffix}"
+                shutil.move(str(bank_file), str(dest))
+                logger.info("📦 Moved to %s", dest)
+        except Exception:
+            logger.exception("❌ Failed to process %s", bank_file.name)
+
+    logger.info("✅ Inbox processing complete")
+
 
 def main() -> None:
     """CLI entry point."""
@@ -98,7 +157,11 @@ def main() -> None:
         prog="prism",
         description="Prism — Bank CSV → AI → Google Sheets",
     )
-    parser.add_argument("--file", "-f", required=True, help="Path to bank CSV export")
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--file", "-f", help="Path to a bank CSV or PDF export")
+    group.add_argument("--inbox", help="Path to folder with CSV/PDF files (processes all)")
+
     parser.add_argument("--currency", default="EUR", help="Currency code (default: EUR)")
     parser.add_argument("--dry-run", action="store_true", help="Print results without writing to Sheets")
 
@@ -106,7 +169,10 @@ def main() -> None:
     settings = load_settings()
 
     try:
-        run(settings, csv_file=args.file, currency=args.currency, dry_run=args.dry_run)
+        if args.inbox:
+            run_inbox(settings, inbox_dir=args.inbox, currency=args.currency, dry_run=args.dry_run)
+        else:
+            run(settings, file=args.file, currency=args.currency, dry_run=args.dry_run)
     except Exception:
         logger.exception("❌ Pipeline failed")
         sys.exit(1)

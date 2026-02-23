@@ -70,7 +70,7 @@ class TestPipelineIntegration:
             ),
         ]
 
-        run(settings, csv_file=csv_file, currency="EUR", dry_run=False)
+        run(settings, file=csv_file, currency="EUR", dry_run=False)
 
         mock_sheets.get_existing_categories.assert_called_once()
         mock_categorise.assert_called_once()
@@ -98,7 +98,7 @@ class TestPipelineIntegration:
             ),
         ]
 
-        run(settings, csv_file=csv_file, currency="EUR", dry_run=True)
+        run(settings, file=csv_file, currency="EUR", dry_run=True)
 
         # In dry-run, Sheets should never be instantiated
         mock_sheets_cls.assert_not_called()
@@ -114,5 +114,5 @@ class TestPipelineIntegration:
 
         # Now run — should detect all as seen and exit early
         with patch("prism.pipeline.categorise") as mock_cat:
-            run(settings, csv_file=csv_file, currency="EUR", dry_run=True)
+            run(settings, file=csv_file, currency="EUR", dry_run=True)
             mock_cat.assert_not_called()  # AI never called

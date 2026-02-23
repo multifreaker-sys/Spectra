@@ -24,12 +24,12 @@ _SCOPES = [
 
 # Default header row (created automatically if the sheet is empty)
 _HEADER = [
-    "Data",
-    "Descrizione Originale",
-    "Descrizione Pulita",
-    "Categoria",
-    "Importo",
-    "Valuta",
+    "Date",
+    "Original Description",
+    "Merchant",
+    "Category",
+    "Amount",
+    "Currency",
 ]
 
 
@@ -42,8 +42,9 @@ class SheetsClient:
         credentials_b64: str = "",
         credentials_file: str = "credentials.json",
     ) -> None:
-        creds = self._load_credentials(credentials_b64, credentials_file)
-        self._gc = gspread.authorize(creds)
+        self._spreadsheet_id = spreadsheet_id
+        self._creds = self._load_credentials(credentials_b64, credentials_file)
+        self._gc = gspread.authorize(self._creds)
         self._spreadsheet = self._gc.open_by_key(spreadsheet_id)
         self._sheet = self._spreadsheet.sheet1  # main worksheet
         logger.info("Connected to spreadsheet: %s", self._spreadsheet.title)
@@ -85,12 +86,13 @@ class SheetsClient:
         if not all_values:
             return []
 
-        # Find the "Categoria" column index
+        # Find the "Category" column index (support both English and legacy Italian)
         header = all_values[0]
+        col_name = "Category" if "Category" in header else "Categoria"
         try:
-            cat_idx = header.index("Categoria")
+            cat_idx = header.index(col_name)
         except ValueError:
-            logger.warning("'Categoria' column not found in header")
+            logger.warning("'Category' column not found in header: %s", header)
             return []
 
         categories: set[str] = set()

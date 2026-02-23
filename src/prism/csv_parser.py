@@ -23,6 +23,7 @@ _DATE_ALIASES = {
 }
 _DESCRIPTION_ALIASES = {
     "descrizione", "description", "causale", "dettagli",
+    "operazione",  # ISyBank
     "details", "merchant", "commerciante", "motivo",
     "remittance", "transaction description", "narrative",
     "wording", "reference", "note", "notes", "memo",
@@ -99,30 +100,31 @@ def _parse_amount(raw: str) -> float:
 
 def _parse_date(raw: str) -> str:
     """Normalize date to YYYY-MM-DD from common formats."""
+    from datetime import datetime
     s = raw.strip()
-    # Try common formats
-    formats = [
-        (r"^(\d{4})-(\d{2})-(\d{2})$", "{1}-{2}-{3}"),       # ISO: 2026-02-22
-        (r"^(\d{2})/(\d{2})/(\d{4})$", "{3}-{2}-{1}"),       # EU: 22/02/2026
-        (r"^(\d{2})-(\d{2})-(\d{4})$", "{3}-{2}-{1}"),       # EU: 22-02-2026
-        (r"^(\d{2})\.(\d{2})\.(\d{4})$", "{3}-{2}-{1}"),     # DE: 22.02.2026
-        (r"^(\d{2})/(\d{2})/(\d{2})$", "20{3}-{2}-{1}"),     # Short: 22/02/26
-        (r"^(\d{8})$", "{0:4}-{0:2}-{0:2}"),                  # Compact: 20260222
+
+    # Try strptime formats (ordered most-specific first)
+    fmt_list = [
+        ("%Y-%m-%d", True),   # ISO: 2026-02-22
+        ("%d/%m/%Y", False),  # EU: 22/02/2026
+        ("%d-%m-%Y", False),  # EU: 22-02-2026
+        ("%d.%m.%Y", False),  # DE: 22.02.2026
+        ("%m/%d/%Y", False),  # US: 02/22/2026
+        ("%m/%d/%y", False),  # US short: 1/31/26  ← ISyBank
+        ("%d/%m/%y", False),  # EU short: 22/02/26
+        ("%Y%m%d",  True),    # Compact: 20260222
     ]
-    for pattern, _ in formats:
-        m = re.match(pattern, s)
-        if m:
-            groups = m.groups()
-            if len(groups) == 3:
-                # Detect if first group is year
-                if len(groups[0]) == 4:
-                    return f"{groups[0]}-{groups[1]}-{groups[2]}"
-                else:
-                    return f"{groups[2]}-{groups[1]}-{groups[0]}"
-    # Compact: 20260222
-    if re.match(r"^\d{8}$", s):
-        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
-    return s  # Return as-is if we can't parse
+    for fmt, _ in fmt_list:
+        try:
+            dt = datetime.strptime(s, fmt)
+            # Sanity: reject obviously wrong years
+            if dt.year < 2000 or dt.year > 2100:
+                continue
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    raise ValueError(f"Cannot parse date: {raw!r}")
 
 
 def _make_id(date: str, description: str, amount: float) -> str:
@@ -181,12 +183,19 @@ def parse_csv(
     reader = csv.reader(raw.splitlines(), delimiter=delimiter)
     rows = list(reader)
 
-    # Skip empty leading rows (some banks add bank name / account info before headers)
+    # Scan rows to find the real header: first row where at least 'date' maps
     header_idx = 0
     for i, row in enumerate(rows):
-        if len([c for c in row if c.strip()]) >= 3:
+        col_candidate = _map_columns(row)
+        if "date" in col_candidate:
             header_idx = i
             break
+    else:
+        # Fallback: first row with ≥3 non-empty cells
+        for i, row in enumerate(rows):
+            if len([c for c in row if c.strip()]) >= 3:
+                header_idx = i
+                break
 
     headers = rows[header_idx]
     data_rows = rows[header_idx + 1:]

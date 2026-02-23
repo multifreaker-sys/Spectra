@@ -29,25 +29,26 @@ class CategorisedTransaction(BaseModel):
 # ── Prompt ───────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
-Sei un assistente finanziario. Il tuo compito è analizzare le descrizioni \
-delle transazioni bancarie e restituire un JSON strutturato.
+You are a personal finance assistant. Your job is to analyze raw bank transaction \
+descriptions and return a structured JSON array.
 
-REGOLE:
-1. Pulisci la descrizione grezza in un nome leggibile (es. "POS 1234 STRBKS IT" → "Starbucks").
-2. Assegna una categoria dalla lista di categorie esistenti, se ne trovi una adatta.
-3. Se nessuna categoria esistente è adatta, creane una nuova significativa.
-4. Se la transazione è davvero ambigua, usa la categoria "Altro".
-5. Rispondi SOLO con un array JSON valido, senza testo aggiuntivo.
+RULES:
+1. Clean the raw description into a human-readable merchant name \
+   (e.g. "POS 1234 STRBKS IT" → "Starbucks").
+2. Assign a category from the list of existing categories if one fits.
+3. If no existing category fits, create a meaningful new one in English.
+4. If truly ambiguous, use the category "Other".
+5. Reply ONLY with a valid JSON array, no extra text.
 
-FORMATO OUTPUT (array JSON):
+OUTPUT FORMAT (JSON array):
 [
   {
-    "original": "<descrizione originale>",
-    "clean_name": "<nome pulito>",
-    "category": "<categoria>",
-    "amount": <importo>,
-    "currency": "<valuta>",
-    "date": "<data>"
+    "original": "<raw description>",
+    "clean_name": "<merchant name>",
+    "category": "<category>",
+    "amount": <amount as number>,
+    "currency": "<currency code>",
+    "date": "<YYYY-MM-DD>"
   }
 ]
 """
@@ -109,8 +110,6 @@ def _call_openai(
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.2,
-        response_format={"type": "json_object"},
     )
     return response.choices[0].message.content or "[]"
 
@@ -120,20 +119,22 @@ def _call_openai(
 
 def _extract_json(text: str) -> list[dict[str, Any]]:
     """Robustly extract a JSON array from LLM output."""
-    # Try direct parse first
     text = text.strip()
     try:
         parsed = json.loads(text)
         if isinstance(parsed, list):
             return parsed
-        if isinstance(parsed, dict) and "transactions" in parsed:
-            return parsed["transactions"]
         if isinstance(parsed, dict):
+            # Look for any key whose value is a list (e.g. "transactions", "data", etc.)
+            for v in parsed.values():
+                if isinstance(v, list):
+                    return v
+            # Single object — wrap in list
             return [parsed]
     except json.JSONDecodeError:
         pass
 
-    # Try to find a JSON array in the text (```json ... ``` blocks)
+    # Try to find a JSON array buried in prose/markdown
     match = re.search(r"\[.*\]", text, re.DOTALL)
     if match:
         try:
@@ -141,7 +142,7 @@ def _extract_json(text: str) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             pass
 
-    logger.error("Failed to parse LLM response as JSON: %s", text[:200])
+    logger.error("Failed to parse LLM response as JSON: %s", text[:300])
     return []
 
 

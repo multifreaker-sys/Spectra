@@ -1,0 +1,59 @@
+name: Prism – CSV → AI → Sheets
+
+on:
+  # Every night at 22:00 CET (21:00 UTC)
+  schedule:
+    - cron: "0 21 * * *"
+  # Also on push when CSVs land in inbox/
+  push:
+    paths:
+      - "inbox/**"
+  # Manual trigger
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      - name: Download DB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prism-db
+          path: data/
+        continue-on-error: true  # First run won't have an artifact
+
+      - name: Run Prism
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_SHEETS_CREDENTIALS_B64: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_B64 }}
+        run: python -m prism --inbox inbox/
+
+      - name: Upload DB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-db
+          path: data/prism.db
+          overwrite: true
+
+      - name: Commit processed files
+        run: |
+          git config user.name "Prism Bot"
+          git config user.email "prism-bot@users.noreply.github.com"
+          git add inbox/ processed/
+          git diff --staged --quiet || git commit -m "📦 Prism: move processed CSVs"
+          git push
