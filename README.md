@@ -18,6 +18,7 @@ Prism takes your raw bank exports (CSV or PDF), sends them through an AI model (
 
 - **Universal Import** — Auto-detects custom delimiters, edge-case bank layouts, Italian/European number formats (`1.234,56`), and multi-line descriptions from CSVs and PDFs. Drop a file in the `inbox/` folder and Prism handles the rest.
 - **AI Categorization** — Cleans obscure bank transfer descriptions into readable merchant names and accurately categorizes them using LLMs, distinguishing between Expenses (Shopping, Food, Transport) and Income (Salary, Transfers In).
+- **Multi-Currency (FX Rates)** — If your bank export contains foreign currencies (USD, GBP, etc.), Prism automatically calls the free [Frankfurter API](https://www.frankfurter.app/) to fetch the exact historical ECB exchange rate for that day, converting everything to EUR to keep your budgets and trends perfectly aligned. (Requires **zero API keys**).
 - **Deterministic Subscriptions** — Uses pattern-matching algorithms to reliably tag recurring subscriptions (Netflix, Amazon, Gym) and recurring income without relying on LLM guesses.
 - **Idempotent** — Maintains a local SQLite database of transaction hashes. Prism never imports the same transaction twice, even if you re-run the same CSV.
 - **Fully Automated (Cron)** — Run it nightly via GitHub Actions. If you add a CSV to the `inbox`, the bot picks it up, updates your Google Sheet, and moves the file to `processed/`.
