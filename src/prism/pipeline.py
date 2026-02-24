@@ -91,6 +91,19 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
             if label:
                 t.recurring = label
 
+        # ── Step 4c: Currency conversion ─────────────────────────
+        from prism.fx import convert_currency
+        for t in categorised:
+            if t.currency.upper() != "EUR":
+                original_amt = t.amount
+                original_cur = t.currency.upper()
+                converted = convert_currency(original_amt, original_cur, "EUR", t.date)
+                
+                t.original_amount = original_amt
+                t.original_currency = original_cur
+                t.amount = converted
+                t.currency = "EUR"
+
         # ── Step 5: Write or print ───────────────────────────────
         if dry_run:
             print(f"\n{'='*72}")
@@ -99,7 +112,8 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
             for t in categorised:
                 sign = "+" if t.amount > 0 else ""
                 tag = f" [{t.recurring}]" if t.recurring else ""
-                print(f"\n  {t.date}  {sign}{t.amount:.2f} {t.currency}{tag}")
+                fx_str = f" (was {t.original_amount:.2f} {t.original_currency})" if t.original_amount is not None else ""
+                print(f"\n  {t.date}  {sign}{t.amount:.2f} {t.currency}{tag}{fx_str}")
                 print(f"  Original : {t.original_description}")
                 print(f"  Clean    : {t.clean_name}")
                 print(f"  Category : {t.category}")

@@ -58,6 +58,8 @@ class ParsedTransaction:
     amount: float   # negative = expense, positive = income
     currency: str
     raw_description: str
+    original_amount: float | None = None
+    original_currency: str | None = None
     counterpart: str = ""
 
 
@@ -139,12 +141,15 @@ def _make_id(date: str, description: str, amount: float) -> str:
     return "CSV-" + hashlib.sha1(key.encode()).hexdigest()[:16]
 
 
-def _map_columns(headers: list[str]) -> dict[str, int]:
-    """Map standard field names to column indices."""
-    mapping: dict[str, int] = {}
-    normalized = [_normalize(h) for h in headers]
+_CURRENCY_ALIASES = {
+    "valuta", "currency", "divisa", "moneta"
+}
 
-    for i, h in enumerate(normalized):
+def _map_columns(headers: list[str]) -> dict[str, int]:
+    """Find the indices of required columns based on known aliases."""
+    mapping: dict[str, int] = {}
+    for i, h_raw in enumerate(headers):
+        h = h_raw.strip().lower()
         if h in _DATE_ALIASES:
             mapping.setdefault("date", i)
         elif h in _DESCRIPTION_ALIASES:
@@ -157,6 +162,8 @@ def _map_columns(headers: list[str]) -> dict[str, int]:
             mapping.setdefault("credit", i)
         elif h in _DEBIT_ALIASES:
             mapping.setdefault("debit", i)
+        elif h in _CURRENCY_ALIASES:
+            mapping.setdefault("currency", i)
 
     return mapping
 
@@ -310,13 +317,19 @@ def parse_csv(
                 amount = abs(credit) - abs(debit)
 
             tx_id = _make_id(date, description, amount)
+            
+            row_currency = currency
+            if "currency" in col and col["currency"] < len(row):
+                val = row[col["currency"]].strip().upper()
+                if val:
+                    row_currency = val
 
             transactions.append(
                 ParsedTransaction(
                     id=tx_id,
                     date=date,
                     amount=amount,
-                    currency=currency,
+                    currency=row_currency,
                     raw_description=description,
                 )
             )

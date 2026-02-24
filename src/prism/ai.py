@@ -23,7 +23,10 @@ class CategorisedTransaction(BaseModel):
     category: str
     amount: float
     currency: str
+    original_amount: float | None = None
+    original_currency: str | None = None
     date: str
+    id: str  # Hash ID for dedup
     recurring: str = ""   # "Subscription", "Salary/Income", or empty
 
 
@@ -210,19 +213,32 @@ def categorise(
     items = _extract_json(raw)
     logger.info("LLM returned %d categorised item(s)", len(items))
 
+    import hashlib
     results: list[CategorisedTransaction] = []
     for item in items:
         try:
             amount = float(item.get("amount", 0))
+
+            # Create a deterministic ID for dedup (used later in the pipeline)
+            date_str = item.get("date", "")
+            desc_str = item.get("original", "")
+            amount_str = str(amount)
+            raw_id = f"{date_str}:{desc_str}:{amount_str}"
+            txn_id = hashlib.sha1(raw_id.encode("utf-8")).hexdigest()
+
             results.append(
                 CategorisedTransaction(
-                    original_description=item.get("original", ""),
+                    id=txn_id,
+                    original_description=desc_str,
                     clean_name=item.get("clean_name", ""),
                     category=item.get("category", "Other"),
                     amount=amount,
                     currency=item.get("currency", "EUR"),
-                    date=item.get("date", ""),
+                    date=date_str,
                     recurring=_normalize_recurring(item.get("recurring", ""), amount),
+                    # These will be filled by the FX converter in the pipeline if needed
+                    original_amount=None,
+                    original_currency=None,
                 )
             )
         except Exception:

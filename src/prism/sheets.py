@@ -32,6 +32,8 @@ _HEADER = [
     "Amount",
     "Currency",
     "Recurring",
+    "Original Amt",
+    "Original Cur",
 ]
 
 # Header styling — deep navy
@@ -307,15 +309,19 @@ class SheetsClient:
             self._ensure_header_on(ws)
 
             rows: list[list[Any]] = [
-                [t.date, t.original_description, t.clean_name, t.category,
-                 t.amount, t.currency, t.recurring]
+                [
+                    t.date, t.original_description, t.clean_name, t.category,
+                    t.amount, t.currency, t.recurring,
+                    t.original_amount if t.original_amount is not None else "",
+                    t.original_currency if t.original_currency is not None else "",
+                ]
                 for t in txns
             ]
             ws.append_rows(rows, value_input_option="USER_ENTERED")
             logger.info("Appended %d row(s) to '%s'", len(rows), ws.title)
 
-            # Resize after data is written
-            self._auto_resize(ws.id, n_cols=7)
+            # Resize after data is written (9 columns: index 0 to 8)
+            self._auto_resize(ws.id, n_cols=9)
             total += len(rows)
 
         return total
