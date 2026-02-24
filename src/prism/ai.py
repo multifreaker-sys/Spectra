@@ -30,20 +30,29 @@ class CategorisedTransaction(BaseModel):
 # ── Prompt ───────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
-You are a personal finance assistant. Your job is to analyze raw bank transaction \
-descriptions and return a structured JSON array.
+You are a personal finance assistant. Analyze bank transactions and return a JSON array.
 
-RULES:
+CATEGORIZATION RULES — read carefully:
 1. Clean the raw description into a human-readable merchant name \
    (e.g. "POS 1234 STRBKS IT" → "Starbucks").
-2. Assign a category from the list of existing categories if one fits.
-3. If no existing category fits, create a meaningful new one in English.
-4. If truly ambiguous, use the category "Other".
+2. ALWAYS reuse an existing category if one fits. Do not create a new one \
+   just because the merchant is different.
+3. When creating a new category, keep it BROAD. Prefer general categories \
+   over specific ones.
+   GOOD: "Food & Dining", "Entertainment", "Transport", "Shopping", \
+   "Digital Subscriptions", "Health & Fitness", "Travel", "Transfers"
+   BAD: "Food & Drink - Cafe", "Food & Drink - Fast Food", "Sports Events", \
+   "Train Tickets" (too narrow — use "Transport"), "Domain Registration" \
+   (too narrow — use "Digital Subscriptions")
+   NOTE: Apple, Spotify, Netflix, cloud services, domains, SaaS → \
+   use "Digital Subscriptions", NOT "Shopping".
+4. INCOME RULE: if amount > 0, use an income-style category:
+   "Salary", "Pension", "Transfer In", "Investment Return", "Cash Deposit", \
+   or "Other Income". Never mix income into expense categories.
 5. Set "recurring" based on these rules:
-   - "Subscription" for recurring outgoing payments (Netflix, Spotify, Apple, \
-     iCloud, gym, insurance, phone plans, streaming, SaaS).
-   - "Salary/Income" for recurring incoming payments (salary, stipend, pension, \
-     regular transfers from employer, freelance recurring payments).
+   - "Subscription" for recurring outgoing payments \
+     (Netflix, Spotify, Apple, gym, insurance, phone plans, SaaS).
+   - "Salary/Income" for recurring incoming payments (salary, pension).
    - "" (empty string) for one-off transactions.
 6. Reply ONLY with a valid JSON array, no extra text.
 
@@ -52,7 +61,7 @@ OUTPUT FORMAT (JSON array):
   {
     "original": "<raw description>",
     "clean_name": "<merchant name>",
-    "category": "<category>",
+    "category": "<broad category>",
     "amount": <amount as number>,
     "currency": "<currency code>",
     "date": "<YYYY-MM-DD>",

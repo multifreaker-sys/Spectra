@@ -12,206 +12,132 @@
 
 ## What is Prism?
 
-Prism takes your raw bank exports (CSV or PDF), sends them through an AI model to categorize every transaction, and writes the results to a formatted Google Sheets spreadsheet — complete with charts and a dashboard.
+Prism takes your raw bank exports (CSV or PDF), sends them through an AI model (OpenAI or Gemini) to categorize every transaction, and builds a comprehensive, multi-tab financial dashboard on Google Sheets.
 
-- **Works with any bank** — auto-detects column names, delimiters, date and number formats
-- **AI-powered** — uses OpenAI or Gemini to clean merchant names and assign categories
-- **Subscription detection** — flags recurring payments (Netflix, Spotify, etc.) with 🔄
-- **Dashboard** — auto-generated charts: spending by category, monthly trends, income vs expenses
-- **Idempotent** — never imports the same transaction twice (SHA1 dedup)
-- **Scheduled** — GitHub Actions cron runs nightly; if there's nothing new, it exits silently
+### Core Features
 
----
+- **Universal Import** — Auto-detects custom delimiters, edge-case bank layouts, Italian/European number formats (`1.234,56`), and multi-line descriptions from CSVs and PDFs. Drop a file in the `inbox/` folder and Prism handles the rest.
+- **AI Categorization** — Cleans obscure bank transfer descriptions into readable merchant names and accurately categorizes them using LLMs, distinguishing between Expenses (Shopping, Food, Transport) and Income (Salary, Transfers In).
+- **Deterministic Subscriptions** — Uses pattern-matching algorithms to reliably tag recurring subscriptions (Netflix, Amazon, Gym) and recurring income without relying on LLM guesses.
+- **Idempotent** — Maintains a local SQLite database of transaction hashes. Prism never imports the same transaction twice, even if you re-run the same CSV.
+- **Fully Automated (Cron)** — Run it nightly via GitHub Actions. If you add a CSV to the `inbox`, the bot picks it up, updates your Google Sheet, and moves the file to `processed/`.
 
-## Quick Start
+### The Google Sheets Dashboard
 
-```bash
-git clone https://github.com/YOUR_USERNAME/Prism.git
-cd Prism
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
-cp .env.example .env
-```
-
-Fill in your `.env`:
-
-```env
-AI_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-SPREADSHEET_ID=1Do7APx...
-GOOGLE_SHEETS_CREDENTIALS_FILE=credentials.json
-```
-
-Then run:
-
-```bash
-# Preview without writing anything
-python -m prism --file your_bank_export.csv --dry-run
-
-# Write to Google Sheets
-python -m prism --file your_bank_export.csv
-```
+Prism automatically creates and formats multiple tabs:
+1. **Transactions YYYY**: A detailed, color-coded ledger for each year.
+2. **Dashboard**: High-level view for the current year. Shows Income vs Expenses, Spending donuts by category, monthly breakdowns, and recurring cash flow.
+3. **Budget**: A dedicated tab where you define your monthly limits. Prism checks these limits against your spending and displays a Live 🟢/🟡/🔴 Budget Status on the Dashboard.
+4. **Trends**: A Year-over-Year (YoY) comparison tab. Tracks your Net Cash Flow, Savings Rate %, and generates comparative multi-year line charts to visualize your trajectory.
 
 ---
 
-## Google Sheets Setup
+## 🚀 Quick Start (Local)
 
-1. Create a project on [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable **Google Sheets API** and **Google Drive API**
-3. Create a **Service Account** → download the JSON key → rename to `credentials.json`
-4. Create a Google Sheet → **Share** it with the service account email (as Editor)
-5. Copy the spreadsheet ID from the URL → paste in `.env`
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/Prism.git
+   cd Prism
+   ```
+
+2. **Setup virtual environment**
+   ```bash
+   python -m venv .venv && source .venv/bin/activate
+   pip install -e .
+   cp .env.example .env
+   ```
+
+3. **Configure the `.env` file** (See sections below for getting these keys)
+   ```env
+   AI_PROVIDER=openai
+   OPENAI_API_KEY=sk-...
+   SPREADSHEET_ID=1Do7APx...
+   GOOGLE_SHEETS_CREDENTIALS_FILE=credentials.json
+   ```
+
+4. **Run Prism**
+   Place your bank exported files `.csv` or `.pdf` in the `inbox/` directory.
+   ```bash
+   # Preview without writing to Google Sheets
+   python -m prism --inbox inbox/ --dry-run
+   
+   # Run the full pipeline (Clean, Categorise, Write to Sheets, Update Dashboards)
+   python -m prism --inbox inbox/
+   ```
 
 ---
 
-## AI Provider
+## 🔑 Getting the Keys
+
+### 1. Google Sheets API (`SPREADSHEET_ID` & `credentials.json`)
+
+To allow Prism to write to your Google Sheet, you need a Service Account.
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new Project (e.g., "Prism Finance").
+3. Navigate to **APIs & Services > Library** and enable **Google Sheets API** and **Google Drive API**.
+4. Navigate to **APIs & Services > Credentials**.
+5. Click **Create Credentials > Service Account**. Name it (e.g., "prism-bot").
+6. Click on the newly created Service Account, go to the **Keys** tab, click **Add Key > Create new key**, choose **JSON**, and download it.
+7. Rename the downloaded file to `credentials.json` and place it in the root of the Prism folder.
+8. **CRITICAL STEP**: Open the `credentials.json` file and copy the `client_email` address.
+9. Create a new blank Google Sheet. Click the **Share** button in the top right, paste the `client_email`, and give it **Editor** permissions.
+10. Copy the Spreadsheet ID from the URL of your new Google Sheet:  
+    `https://docs.google.com/spreadsheets/d/`**`<SPREADSHEET_ID>`**`/edit`
+11. Add this ID to the `SPREADSHEET_ID` variable in your `.env`.
+
+### 2. AI Provider (`OPENAI_API_KEY` or `GEMINI_API_KEY`)
 
 Prism supports **OpenAI** and **Google Gemini**.
 
-| Provider | Model | Config |
-|----------|-------|--------|
-| OpenAI | `gpt-5-nano-2025-08-07` (or any) | `AI_PROVIDER=openai` + `OPENAI_API_KEY` |
-| Gemini | `gemma-3-27b-it` (free tier) | `AI_PROVIDER=gemini` + `GEMINI_API_KEY` |
-
-Get a free Gemini key at [aistudio.google.com](https://aistudio.google.com/apikey).
+| Provider | Config | Notes |
+|----------|--------|-------|
+| OpenAI | `AI_PROVIDER=openai` + `OPENAI_API_KEY` | Best categorization accuracy. Create an API key at [platform.openai.com](https://platform.openai.com). |
+| Gemini | `AI_PROVIDER=gemini` + `GEMINI_API_KEY` | Free tier available. Get a key at [aistudio.google.com](https://aistudio.google.com/apikey). |
 
 ---
 
-## Usage
+## 🤖 GitHub Actions (Cloud Automation)
 
-### Single file
+Prism includes a workflow (`.github/workflows/prism.yml`) that runs every night at 22:00 CET or manually via dispatch. Drop CSVs into the `inbox/` folder, commit to GitHub, and let the Action process them while you sleep.
 
-```bash
-python -m prism --file bank_export.csv
-python -m prism --file statement.pdf
-```
+### Setup GitHub Secrets
 
-### Inbox mode (batch)
+Go to your GitHub Repository **Settings → Secrets and variables → Actions**. Add the following **Repository Secrets**:
 
-Drop one or more CSV/PDF files into `inbox/`, then:
+1. **`OPENAI_API_KEY`**: Your OpenAI key.
+2. **`SPREADSHEET_ID`**: Your Google Sheet ID.
+3. **`GOOGLE_SHEETS_CREDENTIALS_B64`**: The base64-encoded version of your `credentials.json`.
+   
+   To generate this string:
+   * **macOS/Linux**: `base64 -i credentials.json | pbcopy` (copies to clipboard)
+   * **Windows (PowerShell)**: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("credentials.json")) | clip`
 
-```bash
-python -m prism --inbox inbox/
-```
-
-Processed files are automatically moved to `processed/`.
-
-### Options
-
-| Flag | Description |
-|------|-------------|
-| `--file`, `-f` | Path to a single CSV or PDF |
-| `--inbox` | Path to folder (processes all CSV/PDF files) |
-| `--currency` | Currency code, default: `EUR` |
-| `--dry-run` | Preview results in terminal, don't write to Sheets |
+When the action runs, it processes the `inbox/` folder. Processed files are moved to `processed/` and the changes are automatically committed back to the repository.
 
 ---
 
-## GitHub Actions (Automation)
+## 💻 CLI Usage
 
-Prism includes a workflow that runs every night at 22:00 CET. If there are CSV/PDF files in `inbox/`, it processes them automatically.
-
-### Setup
-
-1. Push this repo to GitHub
-2. Go to **Settings → Secrets and variables → Actions**
-3. Add these secrets:
-
-| Secret | Value |
-|--------|-------|
-| `OPENAI_API_KEY` | Your OpenAI key |
-| `SPREADSHEET_ID` | Your Google Sheet ID |
-| `GOOGLE_SHEETS_CREDENTIALS_B64` | Base64 of your `credentials.json` |
-
-Generate the base64 secret:
-
-```bash
-base64 -i credentials.json | pbcopy   # macOS — copies to clipboard
-```
-
-The workflow also triggers on `push` when files land in `inbox/`, so you can just commit a CSV and it runs automatically.
+| Command | Description |
+|---------|-------------|
+| `python -m prism --inbox inbox/` | **Recommended**: Processes all `.csv` and `.pdf` files inside the `inbox/` directory. Automatically moves successfully imported files to `processed/`. |
+| `python -m prism -f export.csv` | Process a single specific file. Does not move the file afterwards. |
+| `--dry-run` | Appended to any command. Runs the parsing and AI categorization, prints the results to the terminal, but **skips** writing to Google Sheets and **skips** database saving. Great for testing. |
+| `--currency USD` | Override the default `EUR` formatting. |
 
 ---
 
-## Supported Formats
+## 🔒 Privacy & Architecture
 
-### CSV
+- **Local Processing First**: The heavy lifting (CSV parsing, description cleaning, deduplication) happens locally or in your private GitHub Action runner.
+- **AI Payload**: Only the transaction date, cleaned description, and amount are sent to the AI Provider for categorization.
+- **No Third-Party Plaid/OpenBanking**: Prism does not connect directly to your bank account. You remain in complete control of your data exports.
+- **Database**: The local `data/prism.db` SQLite database stores **only cryptographic SHA1 hashes** of your transactions to prevent duplicates.
 
-| Bank | Delimiter | Tested |
-|------|-----------|--------|
-| ISyBank / Intesa Sanpaolo | `;` | ✅ |
-| UniCredit | `;` | ✅ |
-| N26 | `,` | ✅ |
-| Revolut | `,` | ✅ |
-| Any other bank | Auto-detect | ✅ |
+## 📄 License
 
-Prism auto-detects: delimiter, column names (Italian/English/German), date format, number format (Italian `1.234,56` or English `1,234.56`), and handles metadata rows before the actual header.
-
-### PDF
-
-Extracts tables from PDF bank statements using `pdfplumber`. Falls back to regex line-matching for text-based PDFs.
-
----
-
-## Project Structure
-
-```
-Prism/
-├── src/prism/
-│   ├── __main__.py        # CLI entry point
-│   ├── config.py          # Environment settings (Pydantic)
-│   ├── csv_parser.py      # Universal CSV parser
-│   ├── pdf_parser.py      # PDF statement parser
-│   ├── ai.py              # LLM categorizer (OpenAI / Gemini)
-│   ├── sheets.py          # Google Sheets writer + formatting
-│   ├── dashboard.py       # Dashboard tab with charts
-│   └── db.py              # SQLite dedup tracker
-├── tests/                 # Unit + integration tests
-├── inbox/                 # Drop CSV/PDF files here
-├── processed/             # Files moved here after processing
-├── .github/workflows/     # GitHub Actions cron job
-├── .env.example           # Template for environment variables
-└── pyproject.toml
-```
-
----
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `AI_PROVIDER` | No | `gemini` | `gemini` or `openai` |
-| `OPENAI_API_KEY` | Yes* | — | OpenAI API key |
-| `GEMINI_API_KEY` | Yes* | — | Gemini API key |
-| `SPREADSHEET_ID` | Yes | — | Google Sheet ID |
-| `GOOGLE_SHEETS_CREDENTIALS_FILE` | Yes† | `credentials.json` | Path to service account JSON |
-| `GOOGLE_SHEETS_CREDENTIALS_B64` | Yes† | — | Base64-encoded JSON (for CI) |
-| `DB_PATH` | No | `data/prism.db` | SQLite database path |
-| `LOG_LEVEL` | No | `INFO` | Logging level |
-
-\* One of the two AI keys is required, depending on `AI_PROVIDER`.
-† One of the two credential methods is required.
-
----
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-python -m pytest tests/ -v
-```
-
----
-
-## Privacy
-
-- Your bank data **never leaves your machine** except for transaction descriptions sent to the AI for categorization
-- No third-party banking APIs — you provide the export file
-- The local SQLite database only stores SHA1 hashes of seen transactions
-- Credentials stay in your `.env` (never committed to git)
-
----
-
-## License
-
-MIT
+This project is licensed under the **Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)**. 
+- You are free to use, share, and adapt the code.
+- You **may not** use the material for commercial purposes or resale.
+See the `LICENSE.md` file for details.

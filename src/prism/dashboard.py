@@ -123,9 +123,23 @@ def refresh_dashboard(sheets_client: Any) -> None:
 
         ws.update("I1", recur_header + recur_rows)
 
+    # Table D: Budget Status (L1)
+    from prism.budget import read_budgets, sync_budget_sheet, compute_budget_status
+    sync_budget_sheet(sheets_client, [cat for cat, _ in sorted_cats])
+    budgets = read_budgets(sheets_client)
+    budget_status = compute_budget_status(dict(sorted_cats), budgets)
+
+    budget_header = [["Category", "Spent (€)", "Budget (€)", "% Used", "Status"]]
+    budget_rows = [
+        [b["category"], b["spent"], b["budget"], b["pct"], b["status"]]
+        for b in budget_status
+    ]
+    if budget_rows:
+        ws.update("L1", budget_header + budget_rows)
+
     logger.info(
-        "Dashboard data written: %d categories, %d months, %d recurring items",
-        len(sorted_cats), len(sorted_months), len(recurring_items),
+        "Dashboard data written: %d categories, %d months, %d recurring items, %d budget entries",
+        len(sorted_cats), len(sorted_months), len(recurring_items), len(budget_rows),
     )
 
     # ── 4b. Format ALL Dashboard headers ──────────────────────────
@@ -144,6 +158,7 @@ def refresh_dashboard(sheets_client: Any) -> None:
                 {"sheetId": _dash_id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 2},   # A1:B1
                 {"sheetId": _dash_id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 3, "endColumnIndex": 7},   # D1:G1
                 {"sheetId": _dash_id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 8, "endColumnIndex": 11},  # I1:K1
+                {"sheetId": _dash_id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 11, "endColumnIndex": 16}, # L1:P1 (Budget)
             ]
             _fmt_requests = [
                 {
@@ -158,13 +173,38 @@ def refresh_dashboard(sheets_client: Any) -> None:
                 }
                 for r in _header_ranges
             ]
-            # Auto-resize all columns
+            # Auto-resize all columns including budget table
             _fmt_requests.append({
                 "autoResizeDimensions": {"dimensions": {
                     "sheetId": _dash_id, "dimension": "COLUMNS",
-                    "startIndex": 0, "endIndex": 12,
+                    "startIndex": 0, "endIndex": 17,  # Up to column Q
                 }}
             })
+            # Budget % Used column (O = index 14): green/yellow/red conditional formatting
+            # Green: < 80%
+            _fmt_requests.append({"addConditionalFormatRule": {"rule": {
+                "ranges": [{"sheetId": _dash_id, "startRowIndex": 1, "startColumnIndex": 14, "endColumnIndex": 15}],
+                "booleanRule": {
+                    "condition": {"type": "NUMBER_LESS", "values": [{"userEnteredValue": "80"}]},
+                    "format": {"backgroundColor": {"red": 0.85, "green": 0.96, "blue": 0.85}},
+                },
+            }, "index": 0}})
+            # Yellow: 80–99%
+            _fmt_requests.append({"addConditionalFormatRule": {"rule": {
+                "ranges": [{"sheetId": _dash_id, "startRowIndex": 1, "startColumnIndex": 14, "endColumnIndex": 15}],
+                "booleanRule": {
+                    "condition": {"type": "NUMBER_BETWEEN", "values": [{"userEnteredValue": "80"}, {"userEnteredValue": "100"}]},
+                    "format": {"backgroundColor": {"red": 1.0, "green": 0.96, "blue": 0.80}},
+                },
+            }, "index": 0}})
+            # Red: >= 100%
+            _fmt_requests.append({"addConditionalFormatRule": {"rule": {
+                "ranges": [{"sheetId": _dash_id, "startRowIndex": 1, "startColumnIndex": 14, "endColumnIndex": 15}],
+                "booleanRule": {
+                    "condition": {"type": "NUMBER_GREATER_THAN_EQ", "values": [{"userEnteredValue": "100"}]},
+                    "format": {"backgroundColor": {"red": 1.0, "green": 0.87, "blue": 0.87}},
+                },
+            }, "index": 0}})
             _svc.spreadsheets().batchUpdate(
                 spreadsheetId=sheets_client._spreadsheet_id,
                 body={"requests": _fmt_requests},
@@ -220,6 +260,13 @@ def refresh_dashboard(sheets_client: Any) -> None:
 
     # ── 6. Sync category conditional colors ───────────────────────────
     sheets_client.sync_category_colors()
+
+    # ── 7. Refresh YoY Trends tab ─────────────────────────────────────
+    try:
+        from prism.trends import refresh_trends
+        refresh_trends(sheets_client)
+    except Exception as e:
+        logger.warning("Trends tab update failed: %s", e)
 
 
 # ── Chart builders ────────────────────────────────────────────────

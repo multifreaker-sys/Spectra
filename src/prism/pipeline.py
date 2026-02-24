@@ -84,6 +84,13 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
             logger.warning("⚠️  LLM returned no results")
             return
 
+        # ── Step 4b: Deterministic recurring detection ────────────
+        from prism.recurring import detect_recurring
+        for t in categorised:
+            label = detect_recurring(t.clean_name, t.original_description, t.amount)
+            if label:
+                t.recurring = label
+
         # ── Step 5: Write or print ───────────────────────────────
         if dry_run:
             print(f"\n{'='*72}")
