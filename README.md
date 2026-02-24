@@ -32,9 +32,14 @@ Prism takes your raw bank exports (CSV or PDF), sends them through an AI model (
 ### The Google Sheets Dashboard
 
 Prism automatically creates and formats multiple tabs:
-1. **Transactions YYYY**: A detailed, color-coded ledger for each year.
-2. **Dashboard**: High-level view for the current year. Shows Income vs Expenses, Spending donuts by category, monthly breakdowns, and recurring cash flow.
-3. **Budget**: A dedicated tab where you define your monthly limits. Prism checks these limits against your spending and displays a Live 🟢/🟡/🔴 Budget Status on the Dashboard.
+
+1. **Dashboard**: High-level view for the current year. Shows Income vs Expenses, Spending donuts by category, monthly breakdowns, and recurring cash flow.
+   <p align="center"><img src="assets/dashboard.png" alt="Prism Dashboard" width="800" /></p>
+
+2. **Budget**: A dedicated tab where you define your monthly limits. Prism checks these limits against your spending and displays a Live 🟢/🟡/🔴 Budget Status on the Dashboard.
+   <p align="center"><img src="assets/budget.png" alt="Prism Budget" width="800" /></p>
+
+3. **Transactions YYYY**: A detailed, color-coded ledger for each year.
 4. **Trends**: A Year-over-Year (YoY) comparison tab. Tracks your Net Cash Flow, Savings Rate %, and generates comparative multi-year line charts to visualize your trajectory.
 
 ---
