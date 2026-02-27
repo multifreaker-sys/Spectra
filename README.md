@@ -8,9 +8,11 @@
   Your personal finance dashboard, fully automated.
 </p>
 
-![Python](https://img.shields.io/badge/python-3.10+-blue)
-![License](https://img.shields.io/badge/license-CC--BY--NC--4.0-lightgrey)
-![Status](https://img.shields.io/badge/status-active-success)
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python" />
+  <img src="https://img.shields.io/badge/license-CC--BY--NC--4.0-lightgrey" alt="License" />
+  <img src="https://img.shields.io/badge/status-active-success" alt="Status" />
+</p>
 
 <p align="center">
   <img src="assets/dashboard.png" alt="Prism Dashboard" width="1000" />
@@ -62,7 +64,7 @@ Prism automatically creates and formats multiple tabs:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Prism.git
+   git clone https://github.com/francescogabrieli/Prism.git
    cd Prism
    ```
 
