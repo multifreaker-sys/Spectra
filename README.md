@@ -28,7 +28,7 @@ Spectra takes your raw bank exports (CSV or PDF), sends them through an AI model
 
 Most personal finance tools require direct access to your bank account or lock your data inside proprietary platforms.
 
-Spectra takes a different approach: it works directly from standard bank exports (CSV or PDF), keeps everything transparent, and builds your dashboard in Google Sheets: a format you fully control and can extend yourself.
+Spectra takes a different approach: it works directly from standard bank exports (CSV or PDF), keeps everything transparent, and builds your dashboard in Google Sheets: a transparent, user-owned format you can export and extend.
 
 ### Core Features
 
@@ -173,17 +173,16 @@ When the action runs, it processes the `inbox/` folder. Processed files are move
 - **AI Payload**: Only the transaction date, cleaned description, and amount are sent to the AI Provider for categorization.
 - **No Third-Party Plaid/OpenBanking**: Spectra does not connect directly to your bank account. You remain in complete control of your data exports.
 - **Database**: The local `data/spectra.db` SQLite database stores **only cryptographic SHA1 hashes** of your transactions to prevent duplicates.
+- **Execution**: Parsing/normalization/dedup run locally. Categorization uses OpenAI/Gemini depending on configuration.
 
 ## 📄 License
 
-## License
-
 Spectra is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 
-This ensures that if you modify Spectra and run it as a service (e.g. SaaS), you must also make the source code of your modifications available to users.
+This ensures that if you modify Spectra and run it as a network service (e.g. SaaS), you must also make the source code of your modifications available to users.
 
 ### Commercial License
 
-A separate commercial license is available for organizations that wish to use Spectra in a closed-source or proprietary product without AGPL obligations.
+A separate commercial license is available for organizations that want to use Spectra in a closed-source or proprietary product without AGPL obligations.
 
-For commercial licensing inquiries, please contact: francesco.gabrieli.fg@gmail.com
+For commercial licensing inquiries, contact: francesco.gabrieli.fg@gmail.com
