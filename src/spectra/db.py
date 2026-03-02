@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS tx_history (
     tx_id       TEXT PRIMARY KEY,
     date        TEXT NOT NULL,
     clean_name  TEXT NOT NULL,
-    amount      REAL NOT NULL
+    amount      REAL NOT NULL,
+    category    TEXT NOT NULL DEFAULT 'Uncategorized'
 );
 
 CREATE TABLE IF NOT EXISTS user_overrides (
@@ -44,7 +45,17 @@ class BookmarkDB:
         self._conn = sqlite3.connect(str(self._path))
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        self._migrate()
         logger.info("Bookmark DB ready at %s", self._path)
+
+    def _migrate(self) -> None:
+        """Apply backwards-compatible schema migrations."""
+        # Add category column to existing tx_history tables
+        try:
+            self._conn.execute("ALTER TABLE tx_history ADD COLUMN category TEXT NOT NULL DEFAULT 'Uncategorized'")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
     # ── Transaction dedup ────────────────────────────────────────
 
@@ -88,10 +99,10 @@ class BookmarkDB:
         """Save a batch of parsed and ML-categorised transactions to history."""
         self._conn.executemany(
             """
-            INSERT OR IGNORE INTO tx_history (tx_id, date, clean_name, amount)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO tx_history (tx_id, date, clean_name, amount, category)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            [(t.id, t.date, t.clean_name, t.amount) for t in transactions],
+            [(t.id, t.date, t.clean_name, t.amount, getattr(t, 'category', 'Uncategorized')) for t in transactions],
         )
         # Also mark them as seen
         self.mark_seen_batch([t.id for t in transactions])

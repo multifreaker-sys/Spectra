@@ -63,10 +63,8 @@ async def api_summary():
     """Return dashboard-level stats."""
     with _get_db() as db:
         rows = db._conn.execute(
-            "SELECT date, clean_name, amount FROM tx_history ORDER BY date DESC"
+            "SELECT date, clean_name, amount, category FROM tx_history ORDER BY date DESC"
         ).fetchall()
-
-        merchants = db.get_merchant_categories()
 
     if not rows:
         return {
@@ -85,8 +83,7 @@ async def api_summary():
     monthly: dict[str, float] = defaultdict(float)
     merchant_totals: Counter = Counter()
 
-    for date, clean_name, amount in rows:
-        cat = merchants.get(clean_name, "Uncategorized")
+    for date, clean_name, amount, cat in rows:
         month = date[:7]  # YYYY-MM
 
         if amount < 0:
@@ -134,15 +131,12 @@ async def api_transactions(
 ):
     """Return paginated transactions from history."""
     with _get_db() as db:
-        merchants = db.get_merchant_categories()
-
-        query = "SELECT tx_id, date, clean_name, amount FROM tx_history ORDER BY date DESC"
+        query = "SELECT tx_id, date, clean_name, amount, category FROM tx_history ORDER BY date DESC"
         rows = db._conn.execute(query).fetchall()
 
     # Build result with categories
     results = []
-    for tx_id, date, clean_name, amount in rows:
-        cat = merchants.get(clean_name, "Uncategorized")
+    for tx_id, date, clean_name, amount, cat in rows:
 
         # Filters
         if category and cat.lower() != category.lower():
@@ -196,11 +190,10 @@ async def api_update_transaction(tx_id: str, request: Request):
 
         if new_category:
             db.save_merchant_category(merchant_name, new_category)
-
-        if new_merchant and new_merchant != old_name:
+            # Also update the category directly on this transaction
             db._conn.execute(
-                "UPDATE tx_history SET clean_name = ? WHERE tx_id = ?",
-                (new_merchant, tx_id),
+                "UPDATE tx_history SET category = ? WHERE tx_id = ?",
+                (new_category, tx_id),
             )
             db._conn.commit()
 
@@ -214,9 +207,10 @@ async def api_update_transaction(tx_id: str, request: Request):
 async def api_categories():
     """Return all known categories."""
     with _get_db() as db:
-        merchants = db.get_merchant_categories()
-    cats = sorted(set(merchants.values()))
-    return {"categories": cats}
+        cats = db._conn.execute(
+            "SELECT DISTINCT category FROM tx_history WHERE category != 'Uncategorized' ORDER BY category"
+        ).fetchall()
+    return {"categories": [row[0] for row in cats]}
 
 
 # ── API: Upload & Process ────────────────────────────────────────
