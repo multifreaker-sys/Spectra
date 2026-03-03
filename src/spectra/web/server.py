@@ -260,10 +260,12 @@ async def api_settings():
 
 @app.post("/api/upload")
 async def api_upload(file: UploadFile = File(...)):
-    """Upload a CSV/PDF, parse & categorise, return preview."""
+    """Upload a CSV/PDF, parse & categorise, stream progress via SSE."""
+    import json as _json
+    from fastapi.responses import StreamingResponse as _SR
+
     settings = load_settings()
 
-    # Validate file type
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     if suffix not in (".csv", ".pdf"):
         return JSONResponse(
@@ -271,103 +273,153 @@ async def api_upload(file: UploadFile = File(...)):
             status_code=400,
         )
 
-    # Save upload to temp file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = tmp.name
+    # Read upload content now (before streaming response starts)
+    file_bytes = await file.read()
 
-    try:
-        # Parse
-        from spectra.csv_parser import parse_csv
-        if suffix.lower() == ".pdf":
-            from spectra.pdf_parser import parse_pdf
-            parsed = parse_pdf(tmp_path, currency=settings.base_currency)
-        else:
-            parsed = parse_csv(tmp_path, currency=settings.base_currency)
+    async def _stream():
+        def evt(pct: int, step: str, **extra) -> str:
+            payload = _json.dumps({"pct": pct, "step": step, **extra})
+            return f"data: {payload}\n\n"
 
-        # Filter duplicates
-        with _get_db() as db:
-            new_txns = [t for t in parsed if not db.is_seen(t.id)]
-            overrides = db.get_overrides()
-            merchant_db = db.get_merchant_categories()
-            training_data = db.get_training_data()
+        try:
+            # ── Phase 1: save to temp ──────────────────────────────
+            yield evt(5, "Saving file...")
+            import asyncio, tempfile, shutil
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(file_bytes)
+                tmp_path = tmp.name
 
-        if not new_txns:
-            return {"transactions": [], "message": "All transactions already imported"}
-
-        # Categorise based on provider
-        from spectra.ai import CategorisedTransaction
-
-        to_process = []
-        pre_categorised = []
-
-        for t in new_txns:
-            od = t.raw_description
-            if od in overrides:
-                pre_categorised.append(CategorisedTransaction(
-                    id=t.id, original_description=od,
-                    clean_name=overrides[od]["clean_name"],
-                    category=overrides[od]["category"],
-                    amount=t.amount, currency=t.currency, date=t.date,
-                ))
-            else:
-                to_process.append(t)
-
-        categorised = list(pre_categorised)
-
-        if to_process:
-            flat = [
-                {"raw_description": t.raw_description, "amount": t.amount,
-                 "currency": t.currency, "date": t.date}
-                for t in to_process
-            ]
-
-            if settings.ai_provider == "local":
-                from spectra.local_categorizer import categorise_local
-                from spectra.ml_classifier import train_classifier
-                ml_clf = train_classifier(training_data) if training_data else None
-                results = categorise_local(flat, [], merchant_db=merchant_db, ml_classifier=ml_clf)
-            else:
-                from spectra.ai import categorise
-                provider = settings.ai_provider
-                if provider == "gemini":
-                    api_key, model = settings.gemini_api_key, settings.gemini_model
+            # ── Phase 2: parse ─────────────────────────────────────
+            yield evt(15, "Parsing transactions...")
+            await asyncio.sleep(0)  # yield control so event is flushed
+            try:
+                if suffix == ".pdf":
+                    from spectra.pdf_parser import parse_pdf
+                    parsed = parse_pdf(tmp_path, currency=settings.base_currency)
                 else:
-                    api_key, model = settings.openai_api_key, settings.openai_model
-                results = categorise(flat, [], provider=provider, api_key=api_key, model=model,
-                                     base_currency=settings.base_currency)
+                    from spectra.csv_parser import parse_csv
+                    parsed = parse_csv(tmp_path, currency=settings.base_currency)
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
 
-            categorised.extend(results)
+            # ── Phase 3: dedup ─────────────────────────────────────
+            yield evt(25, "Checking for duplicates...")
+            await asyncio.sleep(0)
+            with _get_db() as db:
+                new_txns = [t for t in parsed if not db.is_seen(t.id)]
+                overrides = db.get_overrides()
+                merchant_db = db.get_merchant_categories()
+                training_data = db.get_training_data()
 
-        # Apply recurring detection
-        with _get_db() as db:
-            history = db.get_merchant_history()
-        from spectra.recurring import apply_recurring_tags
-        apply_recurring_tags(categorised, history)
+            if not new_txns:
+                yield evt(100, "All transactions already imported", done=True,
+                          transactions=[], message="All transactions already imported")
+                return
 
-        # FX conversion
-        from spectra.fx import convert_currency
-        for t in categorised:
-            if t.currency.upper() != settings.base_currency:
-                orig_amt, orig_cur = t.amount, t.currency.upper()
-                t.amount = convert_currency(orig_amt, orig_cur, settings.base_currency, t.date)
-                t.original_amount, t.original_currency = orig_amt, orig_cur
-                t.currency = settings.base_currency
+            n = len(new_txns)
 
-        preview = [
-            {
-                "id": t.id, "date": t.date, "merchant": t.clean_name,
-                "category": t.category, "amount": t.amount,
-                "currency": t.currency, "recurring": t.recurring,
-                "original_description": t.original_description,
-            }
-            for t in categorised
-        ]
+            # ── Phase 4: categorise (25% → 92%, per transaction) ───
+            from spectra.ai import CategorisedTransaction
 
-        return {"transactions": preview, "message": f"{len(preview)} new transactions"}
+            # Pre-categorise from overrides (instant)
+            pre_cat = []
+            to_process = []
+            for t in new_txns:
+                od = t.raw_description
+                if od in overrides:
+                    pre_cat.append(CategorisedTransaction(
+                        id=t.id, original_description=od,
+                        clean_name=overrides[od]["clean_name"],
+                        category=overrides[od]["category"],
+                        amount=t.amount, currency=t.currency, date=t.date,
+                    ))
+                else:
+                    to_process.append(t)
 
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+            categorised = list(pre_cat)
+
+            if to_process:
+                flat = [
+                    {"raw_description": t.raw_description, "amount": t.amount,
+                     "currency": t.currency, "date": t.date}
+                    for t in to_process
+                ]
+
+                if settings.ai_provider == "local":
+                    from spectra.local_categorizer import categorise_local
+                    from spectra.ml_classifier import train_classifier
+                    ml_clf = train_classifier(training_data) if training_data else None
+
+                    # Categorise one-by-one so we can stream real progress
+                    results = []
+                    for i, row in enumerate(flat):
+                        pct = 25 + int((i + 1) / len(flat) * 67)
+                        yield evt(pct, f"Categorizing {i + 1} / {len(flat)}...")
+                        await asyncio.sleep(0)
+                        r = categorise_local([row], [], merchant_db=merchant_db, ml_classifier=ml_clf)
+                        results.extend(r)
+                    categorised.extend(results)
+
+                else:
+                    # Cloud: categorise in one batch (can't stream per-row)
+                    from spectra.ai import categorise
+                    provider = settings.ai_provider
+                    if provider == "gemini":
+                        api_key, model = settings.gemini_api_key, settings.gemini_model
+                    else:
+                        api_key, model = settings.openai_api_key, settings.openai_model
+
+                    # Fake granular progress while waiting for API
+                    for pct in range(30, 88, 5):
+                        yield evt(pct, f"Waiting for {provider.title()} AI...")
+                        await asyncio.sleep(0.4)
+
+                    results = categorise(flat, [], provider=provider,
+                                         api_key=api_key, model=model,
+                                         base_currency=settings.base_currency)
+                    categorised.extend(results)
+
+            # ── Phase 5: recurring detection ───────────────────────
+            yield evt(94, "Detecting recurring payments...")
+            await asyncio.sleep(0)
+            with _get_db() as db:
+                history = db.get_merchant_history()
+            from spectra.recurring import apply_recurring_tags
+            apply_recurring_tags(categorised, history)
+
+            # ── Phase 6: FX conversion ─────────────────────────────
+            yield evt(97, "Converting currencies...")
+            await asyncio.sleep(0)
+            from spectra.fx import convert_currency
+            for t in categorised:
+                if t.currency.upper() != settings.base_currency:
+                    orig_amt, orig_cur = t.amount, t.currency.upper()
+                    t.amount = convert_currency(orig_amt, orig_cur, settings.base_currency, t.date)
+                    t.original_amount, t.original_currency = orig_amt, orig_cur
+                    t.currency = settings.base_currency
+
+            # ── Done ───────────────────────────────────────────────
+            preview = [
+                {
+                    "id": t.id, "date": t.date, "merchant": t.clean_name,
+                    "category": t.category, "amount": t.amount,
+                    "currency": t.currency, "recurring": t.recurring,
+                    "original_description": t.original_description,
+                }
+                for t in categorised
+            ]
+            yield evt(100, f"{len(preview)} transactions ready", done=True,
+                      transactions=preview, message=f"{len(preview)} new transactions")
+
+        except Exception as e:
+            logger.exception("Upload stream error: %s", e)
+            yield f"data: {_json.dumps({'pct': 0, 'step': 'Error: ' + str(e), 'error': True})}\n\n"
+
+    return _SR(_stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",   # disable nginx buffering if behind proxy
+    })
+
 
 
 @app.post("/api/confirm")

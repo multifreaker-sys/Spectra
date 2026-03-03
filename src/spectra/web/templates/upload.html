@@ -6,24 +6,42 @@
 <p class="page-subtitle">Drag and drop a CSV or PDF bank export</p>
 
 <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-    <div class="icon">📄</div>
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round" style="opacity:.4;margin-bottom:12px;">
+        <polyline points="16 16 12 12 8 16" />
+        <line x1="12" y1="12" x2="12" y2="21" />
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+    </svg>
     <h3>Drop your bank export here</h3>
     <p>Supports CSV and PDF files</p>
     <input type="file" id="fileInput" accept=".csv,.pdf">
 </div>
 
-<div id="processing" style="display:none; text-align:center; padding:40px;">
-    <div class="spinner"></div>
-    <p style="margin-top:16px; color:#787774; font-size:14px;">Processing transactions...</p>
+<!-- Real progress UI (hidden until upload starts) -->
+<div id="processing" style="display:none; padding:40px 0; max-width:480px; margin:0 auto;">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+        <span id="stepLabel" style="font-size:13px; font-weight:500; color:var(--text-muted);">Uploading...</span>
+        <span id="pctLabel"
+            style="font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; color:var(--accent);">0%</span>
+    </div>
+    <div style="height:6px; background:var(--bg-subtle); border-radius:99px; overflow:hidden;">
+        <div id="progressFill"
+            style="height:100%; width:0%; background:var(--accent); border-radius:99px; transition:width 0.25s ease;">
+        </div>
+    </div>
 </div>
 
 <div class="preview-section" id="previewSection">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <h2 style="font-size:18px; font-weight:600;" id="previewTitle">Preview</h2>
         <div style="display:flex; gap:8px;">
-            <button class="btn btn-secondary" onclick="cancelPreview()">Cancel</button>
-            <button class="btn btn-success" id="confirmBtn" onclick="confirmImport()">
-                ✅ Confirm & Save
+            <button class="btn btn-success" id="confirmBtn" onclick="confirmImport()"
+                style="display:flex; align-items:center; gap:6px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Confirm &amp; Save
             </button>
         </div>
     </div>
@@ -65,27 +83,70 @@
         if (fileInput.files.length) uploadFile(fileInput.files[0]);
     });
 
+    function setProgress(pct, step) {
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('pctLabel').textContent = pct + '%';
+        document.getElementById('stepLabel').textContent = step;
+    }
+
     async function uploadFile(file) {
         zone.style.display = 'none';
-        document.getElementById('processing').style.display = 'block';
+        const proc = document.getElementById('processing');
+        proc.style.display = 'block';
+        setProgress(0, 'Connecting...');
 
         const form = new FormData();
         form.append('file', file);
 
         try {
             const res = await fetch('/api/upload', { method: 'POST', body: form });
-            const data = await res.json();
 
-            document.getElementById('processing').style.display = 'none';
-
-            if (!data.transactions || data.transactions.length === 0) {
-                showToast(data.message || 'All transactions already imported', 'error');
-                zone.style.display = '';
-                return;
+            if (!res.ok || !res.body) {
+                throw new Error(`Server error ${res.status}`);
             }
 
-            previewData = data.transactions;
-            showPreview(data.transactions, data.message);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                // SSE events are separated by \n\n
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop(); // keep incomplete trailing chunk
+
+                for (const part of parts) {
+                    const dataLine = part.split('\n').find(l => l.startsWith('data: '));
+                    if (!dataLine) continue;
+
+                    let event;
+                    try { event = JSON.parse(dataLine.slice(6)); } catch { continue; }
+
+                    if (event.error) {
+                        proc.style.display = 'none';
+                        zone.style.display = '';
+                        showToast('Error: ' + event.step, 'error');
+                        return;
+                    }
+
+                    setProgress(event.pct, event.step);
+
+                    if (event.done) {
+                        proc.style.display = 'none';
+                        if (!event.transactions || event.transactions.length === 0) {
+                            showToast(event.message || 'All transactions already imported', 'error');
+                            zone.style.display = '';
+                            return;
+                        }
+                        previewData = event.transactions;
+                        showPreview(event.transactions, event.message);
+                    }
+                }
+            }
+
         } catch (err) {
             document.getElementById('processing').style.display = 'none';
             zone.style.display = '';
@@ -140,7 +201,7 @@
         } catch (err) {
             showToast('Save failed: ' + err.message, 'error');
             btn.disabled = false;
-            btn.textContent = '✅ Confirm & Save';
+            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Confirm & Save`;
         }
     }
 </script>

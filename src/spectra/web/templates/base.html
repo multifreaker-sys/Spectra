@@ -18,28 +18,78 @@
 
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-            <span class="icon">🌟</span>
+            <svg class="brand-icon" width="28" height="24" viewBox="0 0 36 30" fill="none">
+                <!-- Prism body -->
+                <polygon points="16 1 1 29 31 29" fill="#D8E8F0" stroke="#A8BCC8" stroke-width="0.8" />
+                <!-- Incoming white beam -->
+                <line x1="0" y1="17" x2="10" y2="14.5" stroke="#BCC8D4" stroke-width="2" stroke-linecap="round" />
+                <!-- Outgoing spectrum — fanned out -->
+                <line x1="22" y1="10" x2="36" y2="5" stroke="#E03E3E" stroke-width="2" stroke-linecap="round" />
+                <line x1="22" y1="12" x2="36" y2="9" stroke="#FF7F27" stroke-width="2" stroke-linecap="round" />
+                <line x1="22" y1="14" x2="36" y2="13" stroke="#F0C040" stroke-width="2" stroke-linecap="round" />
+                <line x1="22" y1="16" x2="36" y2="17" stroke="#0F7B6C" stroke-width="2" stroke-linecap="round" />
+                <line x1="22" y1="18" x2="36" y2="21" stroke="#2EAADC" stroke-width="2" stroke-linecap="round" />
+                <line x1="22" y1="20" x2="36" y2="25" stroke="#9B51E0" stroke-width="2" stroke-linecap="round" />
+            </svg>
             Spectra
         </div>
         <nav>
             <ul class="sidebar-nav">
                 <li><a href="/" class="{% if request.url.path == '/' %}active{% endif %}">
-                        <span class="nav-icon">📊</span> Dashboard
+                        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="12" width="4" height="9" rx="1" />
+                            <rect x="10" y="7" width="4" height="14" rx="1" />
+                            <rect x="17" y="3" width="4" height="18" rx="1" />
+                        </svg>
+                        Dashboard
                     </a></li>
                 <li><a href="/transactions" class="{% if request.url.path == '/transactions' %}active{% endif %}">
-                        <span class="nav-icon">📋</span> Transactions
+                        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="8" y1="6" x2="21" y2="6" />
+                            <line x1="8" y1="12" x2="21" y2="12" />
+                            <line x1="8" y1="18" x2="21" y2="18" />
+                            <circle cx="4" cy="6" r="1" />
+                            <circle cx="4" cy="12" r="1" />
+                            <circle cx="4" cy="18" r="1" />
+                        </svg>
+                        Transactions
                     </a></li>
                 <li><a href="/budget" class="{% if request.url.path == '/budget' %}active{% endif %}">
-                        <span class="nav-icon">💰</span> Budget
+                        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="4" width="20" height="16" rx="2" />
+                            <line x1="2" y1="10" x2="22" y2="10" />
+                            <circle cx="16" cy="15" r="2" />
+                        </svg>
+                        Budget
                     </a></li>
                 <li><a href="/trends" class="{% if request.url.path == '/trends' %}active{% endif %}">
-                        <span class="nav-icon">📈</span> Trends
+                        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+                            <polyline points="16 7 22 7 22 13" />
+                        </svg>
+                        Trends
                     </a></li>
                 <li><a href="/upload" class="{% if request.url.path == '/upload' %}active{% endif %}">
-                        <span class="nav-icon">📤</span> Upload
+                        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 16 12 12 8 16" />
+                            <line x1="12" y1="12" x2="12" y2="21" />
+                            <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+                        </svg>
+                        Upload
                     </a></li>
                 <li><a href="/settings" class="{% if request.url.path == '/settings' %}active{% endif %}">
-                        <span class="nav-icon">⚙️</span> Settings
+                        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3" />
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                        </svg>
+                        Settings
                     </a></li>
             </ul>
         </nav>
