@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/license-AGPL--3.0-lightgrey" alt="License" />
   <img src="https://img.shields.io/badge/status-active-success" alt="Status" />
   <img src="https://img.shields.io/badge/categorization-openai%20%7C%20gemini%20%7C%20local-blueviolet" alt="Categorization Providers" />
-  <img src="https://img.shields.io/github/stars/francescogabrieli/Spectra?style=social" alt="GitHub stars" />
+  <img src="https://img.shields.io/github/stars/francescogabrieli/Prism?style=social" alt="GitHub stars" />
 </p>
 
 <p align="center">

@@ -50,6 +50,9 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
         if dry_run:
             existing_categories: list[str] = []
             overrides = db.get_overrides()
+            if not isinstance(overrides, dict):
+                logger.warning("⚠️ Invalid local overrides format; ignoring")
+                overrides = {}
         else:
             if not settings.google_sheets_credentials_b64 and not Path(settings.google_sheets_credentials_file).exists():
                 logger.error("❌ Google Sheets credentials missing! Cannot run in production mode.")
@@ -65,6 +68,9 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
             existing_categories = sheets.get_existing_categories()
             logger.info("🔄 Syncing manual overrides from Sheets...")
             overrides = sheets.fetch_overrides()
+            if not isinstance(overrides, dict):
+                logger.warning("⚠️ Invalid overrides payload from Sheets; ignoring")
+                overrides = {}
             db.save_overrides(overrides)
 
         logger.info("📂 Existing categories: %s", existing_categories or "(none)")
