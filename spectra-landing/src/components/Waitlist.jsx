@@ -25,12 +25,9 @@ function useCountUp(target, duration = 1400) {
 export default function Waitlist() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState("idle"); // idle | loading | success | error | apierror
-  // Seed: real count from API + a small base so the number is always credible
-  const COUNT_SEED = 34;
   const [count, setCount] = useState(0);
   const [joined, setJoined] = useState(false);
-  const displayCount = COUNT_SEED + count;
-  const animatedCount = useCountUp(displayCount);
+  const animatedCount = useCountUp(count);
   const ref = useRef(null);
   const inView = useInView(ref, { once: true, margin: "-80px" });
 
@@ -110,27 +107,35 @@ export default function Waitlist() {
             Same privacy-first approach. Zero terminal required. Leave your email and be first in line.
           </motion.p>
 
-          {/* Social proof counter */}
-          <motion.div variants={fadeUp} className="flex items-center justify-center gap-2 mb-8">
-            <div className="flex -space-x-2">
-              {["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b"].map((c, i) => (
-                <div
-                  key={i}
-                  className="w-6 h-6 rounded-full border-2"
-                  style={{
-                    backgroundColor: c,
-                    borderColor: "var(--bg-secondary)",
-                    opacity: 0.9,
-                  }}
+          <motion.div variants={fadeUp} className="mb-8 flex justify-center">
+            <motion.div
+              className="inline-flex items-center gap-2.5 px-3.5 py-2 rounded-full text-sm font-medium"
+              style={{
+                background: "linear-gradient(135deg, rgba(99,102,241,0.1), rgba(124,58,237,0.1))",
+                color: "var(--text-secondary)",
+                border: "1px solid rgba(99,102,241,0.2)",
+              }}
+              whileHover={{ scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+            >
+              <span className="relative flex h-2.5 w-2.5">
+                <motion.span
+                  className="absolute inline-flex h-full w-full rounded-full"
+                  style={{ backgroundColor: "var(--grad-a)" }}
+                  animate={{ scale: [1, 1.9, 1], opacity: [0.6, 0, 0.6] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
                 />
-              ))}
-            </div>
-            <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              <span className="font-semibold" style={{ color: "var(--text-primary)" }}>
-                {animatedCount}+
-              </span>{" "}
-              people already in line
-            </span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ backgroundColor: "var(--grad-a)" }} />
+              </span>
+              <motion.span
+                className="font-medium"
+                style={{ color: "var(--text-primary)" }}
+                animate={{ opacity: [0.72, 1, 0.72] }}
+                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+              >
+                Join the first users on the waitlist
+              </motion.span>
+            </motion.div>
           </motion.div>
         </motion.div>
 
