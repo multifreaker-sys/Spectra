@@ -52,10 +52,53 @@
     let monthlyChart = null;
     let categoryChart = null;
 
-    const COLORS = [
-        '#2EAADC', '#0F7B6C', '#D9730D', '#E03E3E', '#9B51E0',
-        '#6940A5', '#AD1A72', '#E16259', '#CC8E22', '#448361',
-    ];
+    function cssVar(name, fallback = '') {
+        return window.SpectraTheme?.getCssVar(name, fallback) || fallback;
+    }
+
+    function alphaColor(color, alpha) {
+        if (!color) {
+            return color;
+        }
+
+        if (color.startsWith('#')) {
+            let hex = color.slice(1);
+            if (hex.length === 3) {
+                hex = hex.split('').map(char => char + char).join('');
+            }
+
+            const red = parseInt(hex.slice(0, 2), 16);
+            const green = parseInt(hex.slice(2, 4), 16);
+            const blue = parseInt(hex.slice(4, 6), 16);
+            return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+        }
+
+        const match = color.match(/rgba?\(([^)]+)\)/);
+        if (!match) {
+            return color;
+        }
+
+        const channels = match[1].split(',').slice(0, 3).map(value => value.trim());
+        return `rgba(${channels.join(', ')}, ${alpha})`;
+    }
+
+    function getTrendTheme() {
+        return {
+            fontFamily: cssVar('--font', 'Inter, sans-serif'),
+            mutedColor: cssVar('--text-muted', '#787774'),
+            gridColor: cssVar('--chart-grid', '#F1F1EF'),
+            incomeFill: alphaColor(cssVar('--positive', '#0F7B6C'), 0.75),
+            expenseFill: alphaColor(cssVar('--negative', '#E03E3E'), 0.75),
+            palette: [
+                cssVar('--accent', '#2EAADC'),
+                cssVar('--positive', '#0F7B6C'),
+                cssVar('--warning', '#D9730D'),
+                cssVar('--negative', '#E03E3E'),
+                cssVar('--purple', '#9B51E0'),
+                '#6940A5', '#AD1A72', '#E16259', '#CC8E22', '#448361',
+            ],
+        };
+    }
 
     async function loadTrends() {
         const res = await fetch('/api/trends');
@@ -108,6 +151,7 @@
     }
 
     function renderMonthlyChart(year) {
+        const theme = getTrendTheme();
         const series = trendsData.monthly_series.filter(m => m.month.startsWith(year));
         const labels = series.map(m => {
             const [y, mo] = m.month.split('-');
@@ -123,14 +167,14 @@
                     {
                         label: 'Income',
                         data: series.map(m => m.income),
-                        backgroundColor: 'rgba(15, 123, 108, 0.75)',
+                        backgroundColor: theme.incomeFill,
                         borderRadius: 6,
                         borderSkipped: false,
                     },
                     {
                         label: 'Expenses',
                         data: series.map(m => m.expenses),
-                        backgroundColor: 'rgba(224, 62, 62, 0.75)',
+                        backgroundColor: theme.expenseFill,
                         borderRadius: 6,
                         borderSkipped: false,
                     },
@@ -140,7 +184,13 @@
                 responsive: true,
                 animation: { duration: 600, easing: 'easeOutQuart' },
                 plugins: {
-                    legend: { labels: { font: { family: 'Inter', size: 12 }, usePointStyle: true } },
+                    legend: {
+                        labels: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 12 },
+                            usePointStyle: true,
+                        },
+                    },
                     tooltip: {
                         callbacks: {
                             label: ctx => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}`
@@ -150,11 +200,18 @@
                 scales: {
                     y: {
                         beginAtZero: true,
-                        ticks: { font: { family: 'Inter', size: 11 }, callback: v => '€' + v.toLocaleString('it-IT') },
-                        grid: { color: '#F1F1EF' },
+                        ticks: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 11 },
+                            callback: v => '€' + v.toLocaleString('it-IT'),
+                        },
+                        grid: { color: theme.gridColor },
                     },
                     x: {
-                        ticks: { font: { family: 'Inter', size: 11 } },
+                        ticks: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 11 },
+                        },
                         grid: { display: false },
                     },
                 },
@@ -163,6 +220,7 @@
     }
 
     function renderCategoryChart(year) {
+        const theme = getTrendTheme();
         const cats = trendsData.by_year[year]?.by_category || {};
         const labels = Object.keys(cats);
         const values = Object.values(cats);
@@ -182,7 +240,7 @@
                 datasets: [{
                     label: 'Spending',
                     data: values,
-                    backgroundColor: COLORS.slice(0, labels.length),
+                    backgroundColor: theme.palette.slice(0, labels.length),
                     borderRadius: 6,
                     borderSkipped: false,
                 }],
@@ -200,17 +258,31 @@
                 scales: {
                     x: {
                         beginAtZero: true,
-                        ticks: { font: { family: 'Inter', size: 11 }, callback: v => '€' + v.toLocaleString('it-IT') },
-                        grid: { color: '#F1F1EF' },
+                        ticks: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 11 },
+                            callback: v => '€' + v.toLocaleString('it-IT'),
+                        },
+                        grid: { color: theme.gridColor },
                     },
                     y: {
-                        ticks: { font: { family: 'Inter', size: 12 } },
+                        ticks: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 12 },
+                        },
                         grid: { display: false },
                     },
                 },
             },
         });
     }
+
+    window.addEventListener('spectra-theme-change', () => {
+        if (trendsData && selectedYear) {
+            renderMonthlyChart(selectedYear);
+            renderCategoryChart(selectedYear);
+        }
+    });
 
     loadTrends();
 </script>

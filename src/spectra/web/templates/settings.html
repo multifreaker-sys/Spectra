@@ -6,6 +6,24 @@
 <p class="page-subtitle">Managed via .env file — shown here as read-only reference</p>
 
 <div class="settings-group">
+    <h3>Appearance</h3>
+    <div class="settings-row">
+        <div class="settings-label">
+            Theme
+            <small>Auto follows your system appearance, or force Light or Dark manually</small>
+        </div>
+        <div class="settings-control-group">
+            <select class="settings-select" id="themePreference" data-theme-select>
+                <option value="auto">Auto</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+            </select>
+            <span class="settings-badge" id="themeStatus">—</span>
+        </div>
+    </div>
+</div>
+
+<div class="settings-group">
     <h3>AI Provider</h3>
     <div class="settings-row">
         <div class="settings-label">
@@ -84,6 +102,49 @@
 
 {% block scripts %}
 <script>
+    function updateThemePreferenceUI(state = window.SpectraTheme?.getState()) {
+        const select = document.getElementById('themePreference');
+        const badge = document.getElementById('themeStatus');
+        if (!select || !badge || !state) {
+            return;
+        }
+
+        select.value = state.preference;
+
+        if (state.preference === 'auto') {
+            badge.textContent = `Auto · System ${state.effectiveTheme === 'dark' ? 'Dark' : 'Light'}`;
+        } else {
+            badge.textContent = state.effectiveTheme === 'dark' ? 'Dark' : 'Light';
+        }
+
+        badge.className = `settings-badge ${state.effectiveTheme === 'dark' ? 'theme-dark' : 'theme-light'}`;
+    }
+
+    function initThemePreference() {
+        const select = document.getElementById('themePreference');
+        if (!select || !window.SpectraTheme) {
+            return;
+        }
+
+        updateThemePreferenceUI(window.SpectraTheme.getState());
+
+        select.addEventListener('change', event => {
+            const state = window.SpectraTheme.setPreference(event.target.value);
+            updateThemePreferenceUI(state);
+
+            const labels = {
+                auto: 'Theme set to Auto',
+                light: 'Theme set to Light',
+                dark: 'Theme set to Dark',
+            };
+            showToast(labels[state.preference] || 'Theme updated', 'info');
+        });
+
+        window.addEventListener('spectra-theme-change', event => {
+            updateThemePreferenceUI(event.detail || window.SpectraTheme.getState());
+        });
+    }
+
     async function loadSettings() {
         try {
             const res = await fetch('/api/settings');
@@ -186,6 +247,7 @@
         }
     }
 
+    initThemePreference();
     loadSettings();
 </script>
 {% endblock %}

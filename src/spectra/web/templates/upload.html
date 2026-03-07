@@ -165,10 +165,10 @@
             <td>${t.date}</td>
             <td>${t.merchant}</td>
             <td><span class="${uncat ? 'badge badge-uncategorized' : 'badge'}">
-                <span class="badge-dot" style="background:${uncat ? '#D9730D' : '#0F7B6C'}"></span>
+                <span class="badge-dot ${uncat ? '' : 'badge-dot-positive'}"></span>
                 ${t.category}
             </span></td>
-            <td style="font-size:12px; color:#787774">${t.recurring || '—'}</td>
+            <td class="table-cell-muted">${t.recurring || '—'}</td>
             <td class="amount ${cls}" style="text-align:right">${formatCurrency(t.amount)}</td>
         </tr>`;
         }).join('');

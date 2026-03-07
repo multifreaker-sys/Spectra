@@ -31,6 +31,10 @@
     let currentPage = 1;
     let categories = [];
 
+    function themeVar(name, fallback = '') {
+        return window.SpectraTheme?.getCssVar(name, fallback) || fallback;
+    }
+
     async function loadCategories() {
         const res = await fetch('/api/categories');
         const data = await res.json();
@@ -117,7 +121,7 @@
         if (total <= 1) { container.innerHTML = ''; return; }
 
         let html = `<button ${page <= 1 ? 'disabled' : ''} onclick="loadTransactions(${page - 1})">← Prev</button>`;
-        html += `<span style="font-size:13px;color:#787774">Page ${page} of ${total}</span>`;
+        html += `<span class="pagination-info">Page ${page} of ${total}</span>`;
         html += `<button ${page >= total ? 'disabled' : ''} onclick="loadTransactions(${page + 1})">Next →</button>`;
         container.innerHTML = html;
     }
@@ -134,7 +138,7 @@
             'Cash Withdrawal': '#E03E3E', 'Reimbursement': '#448361',
             'Transfer In': '#0F7B6C', 'Other Income': '#0F7B6C',
         };
-        return colors[cat] || '#787774';
+        return colors[cat] || themeVar('--text-muted', '#787774');
     }
 
     function editField(el, txId, field) {
@@ -177,6 +181,10 @@
     document.getElementById('categoryFilter').addEventListener('change', () => loadTransactions(1));
     document.getElementById('dateFrom').addEventListener('change', () => loadTransactions(1));
     document.getElementById('dateTo').addEventListener('change', () => loadTransactions(1));
+
+    window.addEventListener('spectra-theme-change', () => {
+        loadTransactions(currentPage);
+    });
 
     loadCategories();
     loadTransactions();

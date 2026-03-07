@@ -9,6 +9,37 @@
     <title>{% block title %}Spectra{% endblock %}</title>
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌟</text></svg>">
+    <script>
+        const THEME_STORAGE_KEY = 'spectra-theme-preference';
+        const THEME_OPTIONS = ['auto', 'light', 'dark'];
+
+        function getStoredThemePreference() {
+            try {
+                const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+                return THEME_OPTIONS.includes(stored) ? stored : 'auto';
+            } catch (err) {
+                return 'auto';
+            }
+        }
+
+        function getSystemTheme() {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function resolveTheme(preference = getStoredThemePreference()) {
+            return preference === 'auto' ? getSystemTheme() : preference;
+        }
+
+        function applyTheme(preference = getStoredThemePreference()) {
+            const effectiveTheme = resolveTheme(preference);
+            document.documentElement.dataset.theme = effectiveTheme;
+            document.documentElement.dataset.themePreference = preference;
+            window.__spectraTheme = { preference, effectiveTheme };
+            return window.__spectraTheme;
+        }
+
+        applyTheme();
+    </script>
     <link rel="stylesheet" href="/static/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -105,6 +136,62 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <script>
+        const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function emitThemeChange(detail) {
+            window.dispatchEvent(new CustomEvent('spectra-theme-change', { detail }));
+        }
+
+        function syncThemeSelects() {
+            const preference = getStoredThemePreference();
+            document.querySelectorAll('[data-theme-select]').forEach(select => {
+                if (select.value !== preference) {
+                    select.value = preference;
+                }
+            });
+        }
+
+        function setThemePreference(preference) {
+            const normalized = THEME_OPTIONS.includes(preference) ? preference : 'auto';
+            try {
+                window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
+            } catch (err) {
+                // Ignore storage failures and still apply the theme for this session.
+            }
+
+            const detail = applyTheme(normalized);
+            syncThemeSelects();
+            emitThemeChange(detail);
+            return detail;
+        }
+
+        const handleSystemThemeChange = () => {
+            if (getStoredThemePreference() !== 'auto') {
+                return;
+            }
+
+            const detail = applyTheme('auto');
+            syncThemeSelects();
+            emitThemeChange(detail);
+        };
+
+        if (typeof themeMediaQuery.addEventListener === 'function') {
+            themeMediaQuery.addEventListener('change', handleSystemThemeChange);
+        } else if (typeof themeMediaQuery.addListener === 'function') {
+            themeMediaQuery.addListener(handleSystemThemeChange);
+        }
+
+        window.SpectraTheme = {
+            getPreference: getStoredThemePreference,
+            getEffectiveTheme: () => resolveTheme(getStoredThemePreference()),
+            getState: () => window.__spectraTheme || applyTheme(getStoredThemePreference()),
+            setPreference: setThemePreference,
+            getCssVar: (name, fallback = '') => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback,
+            syncThemeSelects,
+        };
+
+        syncThemeSelects();
+
         function showToast(message, type = 'success') {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');

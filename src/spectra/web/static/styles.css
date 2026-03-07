@@ -8,6 +8,7 @@
     --text-muted: #787774;
     --text-faint: #C4C4C0;
     --bg: #FFFFFF;
+    --bg-elevated: #FFFFFF;
     --bg-hover: #FBFBFA;
     --bg-subtle: #F7F6F3;
     --border: #E9E9E7;
@@ -18,6 +19,32 @@
     --negative: #E03E3E;
     --warning: #D9730D;
     --purple: #9B51E0;
+    --interactive-hover: rgba(55, 53, 47, 0.04);
+    --interactive-active: rgba(46, 170, 220, 0.06);
+    --focus-ring: rgba(46, 170, 220, 0.12);
+    --overlay: rgba(255, 255, 255, 0.85);
+    --chart-grid: #F1F1EF;
+    --input-bg: #FFFFFF;
+    --input-bg-accent: #EDF9FD;
+    --upload-zone-active: #EDF9FD;
+    --badge-warning-bg: #FFF3E0;
+    --badge-warning-text: #D9730D;
+    --badge-local-bg: #E8F5E9;
+    --badge-local-text: #0F7B6C;
+    --badge-cloud-bg: #E3F2FD;
+    --badge-cloud-text: #2EAADC;
+    --badge-theme-light-bg: #F3EFE6;
+    --badge-theme-light-text: #6D5A2D;
+    --badge-theme-dark-bg: #1B2C39;
+    --badge-theme-dark-text: #8FD6F4;
+    --toast-success-bg: #DBFBEF;
+    --toast-success-border: #B7E4CF;
+    --toast-error-bg: #FDE8E8;
+    --toast-error-border: #F5C6C6;
+    --toast-info-bg: #E3F2FD;
+    --toast-info-border: #B3D8F0;
+    --negative-glow: rgba(224, 62, 62, 0.4);
+    --accent-glow: rgba(46, 170, 220, 0.25);
     --sidebar-w: 240px;
     --radius-sm: 4px;
     --radius: 8px;
@@ -25,6 +52,52 @@
     --shadow-sm: 0 1px 3px rgba(15, 15, 15, .04), 0 1px 2px rgba(15, 15, 15, .06);
     --shadow-md: 0 4px 12px rgba(15, 15, 15, .08);
     --transition: 0.18s ease;
+}
+
+html[data-theme='dark'] {
+    --text: #F3F1EC;
+    --text-muted: #B2ACA1;
+    --text-faint: #6E6A63;
+    --bg: #181C22;
+    --bg-elevated: #1F242C;
+    --bg-hover: #232932;
+    --bg-subtle: #0E1319;
+    --border: #303743;
+    --border-light: #252C35;
+    --accent: #5FBEE8;
+    --accent-hover: #79CBEE;
+    --positive: #4FB89C;
+    --negative: #F06B6B;
+    --warning: #E8A647;
+    --purple: #B785F5;
+    --interactive-hover: rgba(255, 255, 255, 0.05);
+    --interactive-active: rgba(95, 190, 232, 0.16);
+    --focus-ring: rgba(95, 190, 232, 0.18);
+    --overlay: rgba(8, 11, 15, 0.82);
+    --chart-grid: #2A3340;
+    --input-bg: #141920;
+    --input-bg-accent: #142735;
+    --upload-zone-active: #132633;
+    --badge-warning-bg: #392916;
+    --badge-warning-text: #F0B761;
+    --badge-local-bg: #123127;
+    --badge-local-text: #73D2B2;
+    --badge-cloud-bg: #122937;
+    --badge-cloud-text: #8FD6F4;
+    --badge-theme-light-bg: #2B271E;
+    --badge-theme-light-text: #E5C983;
+    --badge-theme-dark-bg: #1B2C39;
+    --badge-theme-dark-text: #8FD6F4;
+    --toast-success-bg: #123126;
+    --toast-success-border: #23553F;
+    --toast-error-bg: #3A1818;
+    --toast-error-border: #6C2A2A;
+    --toast-info-bg: #142735;
+    --toast-info-border: #23465D;
+    --negative-glow: rgba(240, 107, 107, 0.32);
+    --accent-glow: rgba(95, 190, 232, 0.28);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35), 0 8px 20px rgba(0, 0, 0, .14);
+    --shadow-md: 0 12px 30px rgba(0, 0, 0, .34);
 }
 
 /* ─── Reset & Base ─────────────────────────────────────────────── */
@@ -41,6 +114,12 @@ html {
     font-size: 16px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background: var(--bg-subtle);
+    color-scheme: light;
+}
+
+html[data-theme='dark'] {
+    color-scheme: dark;
 }
 
 body {
@@ -50,13 +129,14 @@ body {
     line-height: 1.5;
     display: flex;
     min-height: 100vh;
+    transition: background-color var(--transition), color var(--transition);
 }
 
 /* ─── Sidebar ──────────────────────────────────────────────────── */
 
 .sidebar {
     width: var(--sidebar-w);
-    background: var(--bg);
+    background: var(--bg-elevated);
     border-right: 1px solid var(--border);
     padding: 24px 14px;
     display: flex;
@@ -118,12 +198,12 @@ body {
 }
 
 .sidebar-nav a:hover {
-    background: rgba(55, 53, 47, 0.04);
+    background: var(--interactive-hover);
     color: var(--text);
 }
 
 .sidebar-nav a.active {
-    background: rgba(55, 53, 47, 0.06);
+    background: var(--interactive-active);
     color: var(--text);
     font-weight: 600;
 }
@@ -167,6 +247,7 @@ body {
     padding: 8px 10px;
     cursor: pointer;
     font-size: 18px;
+    color: var(--text);
     box-shadow: var(--shadow-sm);
 }
 
@@ -216,7 +297,7 @@ body {
 }
 
 .card {
-    background: var(--bg);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 20px 22px;
@@ -271,7 +352,7 @@ body {
 }
 
 .chart-box {
-    background: var(--bg);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 24px;
@@ -297,7 +378,7 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
-    background: var(--bg);
+    background: var(--bg-elevated);
     box-shadow: var(--shadow-sm);
 }
 
@@ -319,7 +400,7 @@ body {
     font-size: 13px;
     font-family: var(--font);
     color: var(--text);
-    background: var(--bg);
+    background: var(--input-bg);
     outline: none;
     transition: border-color var(--transition), box-shadow var(--transition);
 }
@@ -327,7 +408,7 @@ body {
 .table-toolbar input:focus,
 .table-toolbar select:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(46, 170, 220, .12);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .table-toolbar input::placeholder {
@@ -412,13 +493,17 @@ td.amount.income {
     flex-shrink: 0;
 }
 
+.badge-dot-positive {
+    background: var(--positive);
+}
+
 .badge-uncategorized {
-    background: #FFF3E0;
-    color: var(--warning);
+    background: var(--badge-warning-bg);
+    color: var(--badge-warning-text);
 }
 
 .badge-uncategorized .badge-dot {
-    background: var(--warning);
+    background: var(--badge-warning-text);
 }
 
 /* ─── Upload Zone ──────────────────────────────────────────────── */
@@ -428,7 +513,7 @@ td.amount.income {
     border-radius: var(--radius-lg);
     padding: 72px 40px;
     text-align: center;
-    background: var(--bg);
+    background: var(--bg-elevated);
     transition: all 0.25s ease;
     cursor: pointer;
 }
@@ -442,7 +527,7 @@ td.amount.income {
 
 .upload-zone.drag-over {
     border-color: var(--accent);
-    background: #EDF9FD;
+    background: var(--upload-zone-active);
     transform: scale(1.01);
 }
 
@@ -531,7 +616,7 @@ td.amount.income {
 }
 
 .btn-secondary {
-    background: var(--bg);
+    background: var(--bg-elevated);
     color: var(--text);
     border: 1px solid var(--border);
 }
@@ -574,7 +659,7 @@ td.amount.income {
 /* ─── Settings ─────────────────────────────────────────────────── */
 
 .settings-group {
-    background: var(--bg);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 24px;
@@ -628,6 +713,33 @@ td.amount.income {
     font-variant-numeric: tabular-nums;
 }
 
+.settings-control-group {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.settings-select {
+    min-width: 140px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: var(--font);
+    color: var(--text);
+    background: var(--input-bg);
+    outline: none;
+    cursor: pointer;
+    transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
+}
+
+.settings-select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
 .settings-badge {
     display: inline-flex;
     align-items: center;
@@ -639,13 +751,23 @@ td.amount.income {
 }
 
 .settings-badge.local {
-    background: #E8F5E9;
-    color: var(--positive);
+    background: var(--badge-local-bg);
+    color: var(--badge-local-text);
 }
 
 .settings-badge.cloud {
-    background: #E3F2FD;
-    color: var(--accent);
+    background: var(--badge-cloud-bg);
+    color: var(--badge-cloud-text);
+}
+
+.settings-badge.theme-light {
+    background: var(--badge-theme-light-bg);
+    color: var(--badge-theme-light-text);
+}
+
+.settings-badge.theme-dark {
+    background: var(--badge-theme-dark-bg);
+    color: var(--badge-theme-dark-text);
 }
 
 .settings-danger-zone {
@@ -666,7 +788,7 @@ td.amount.income {
     padding: 6px 12px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--bg);
+    background: var(--bg-elevated);
     color: var(--text);
     font-size: 13px;
     font-family: var(--font);
@@ -696,6 +818,11 @@ td.amount.income {
     font-variant-numeric: tabular-nums;
 }
 
+.table-cell-muted {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
 /* ─── Inline Edit ──────────────────────────────────────────────── */
 
 .editable {
@@ -706,7 +833,7 @@ td.amount.income {
 }
 
 .editable:hover {
-    background: rgba(46, 170, 220, 0.08);
+    background: var(--interactive-active);
 }
 
 .edit-input {
@@ -717,8 +844,9 @@ td.amount.income {
     font-family: var(--font);
     outline: none;
     width: 100%;
-    background: #EDF9FD;
-    box-shadow: 0 0 0 3px rgba(46, 170, 220, .12);
+    color: var(--text);
+    background: var(--input-bg-accent);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* ─── Loading / Spinner ────────────────────────────────────────── */
@@ -759,7 +887,7 @@ td.amount.income {
 .loading-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(255, 255, 255, 0.85);
+    background: var(--overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -798,21 +926,21 @@ td.amount.income {
 }
 
 .toast-success {
-    background: #DBFBEF;
+    background: var(--toast-success-bg);
     color: var(--positive);
-    border: 1px solid #B7E4CF;
+    border: 1px solid var(--toast-success-border);
 }
 
 .toast-error {
-    background: #FDE8E8;
+    background: var(--toast-error-bg);
     color: var(--negative);
-    border: 1px solid #F5C6C6;
+    border: 1px solid var(--toast-error-border);
 }
 
 .toast-info {
-    background: #E3F2FD;
+    background: var(--toast-info-bg);
     color: var(--accent);
-    border: 1px solid #B3D8F0;
+    border: 1px solid var(--toast-info-border);
 }
 
 @keyframes fadeIn {
@@ -949,7 +1077,7 @@ td.amount.income {
 }
 
 .budget-card {
-    background: var(--bg);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 20px;
@@ -1007,6 +1135,22 @@ td.amount.income {
     letter-spacing: -0.02em;
 }
 
+.budget-spent.status-green {
+    color: var(--positive);
+}
+
+.budget-spent.status-yellow {
+    color: var(--warning);
+}
+
+.budget-spent.status-red {
+    color: var(--negative);
+}
+
+.budget-spent.status-none {
+    color: var(--text-faint);
+}
+
 .budget-sep {
     color: var(--border);
     font-size: 14px;
@@ -1023,7 +1167,7 @@ td.amount.income {
 }
 
 .budget-limit-display:hover {
-    background: rgba(46, 170, 220, .08);
+    background: var(--interactive-active);
     color: var(--accent);
 }
 
@@ -1052,7 +1196,7 @@ td.amount.income {
 
 .progress-fill.status-red {
     background: var(--negative);
-    box-shadow: 0 0 6px rgba(224, 62, 62, .4);
+    box-shadow: 0 0 6px var(--negative-glow);
 }
 
 .progress-fill.status-none {
@@ -1079,7 +1223,7 @@ td.amount.income {
     padding: 8px 22px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--bg);
+    background: var(--bg-elevated);
     color: var(--text-muted);
     font-family: var(--font);
     font-size: 14px;
@@ -1097,7 +1241,7 @@ td.amount.income {
     background: var(--accent);
     border-color: var(--accent);
     color: #FFFFFF;
-    box-shadow: 0 2px 10px rgba(46, 170, 220, .25);
+    box-shadow: 0 2px 10px var(--accent-glow);
 }
 
 /* ─── Entrance Animations ──────────────────────────────────────── */
@@ -1136,7 +1280,7 @@ td.amount.income {
 
 .sidebar-nav a.active {
     border-left-color: var(--accent);
-    background: rgba(46, 170, 220, .06);
+    background: var(--interactive-active);
     color: var(--text);
 }
 
@@ -1197,6 +1341,16 @@ td.amount.income {
 
     .table-toolbar {
         gap: 6px;
+    }
+
+    .settings-row {
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .settings-control-group {
+        width: 100%;
+        justify-content: flex-start;
     }
 
     .table-toolbar input,

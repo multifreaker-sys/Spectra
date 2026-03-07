@@ -59,9 +59,7 @@
         }
 
         grid.innerHTML = data.items.map((item, i) => {
-            const statusColors = { green: '#0F7B6C', yellow: '#D9730D', red: '#E03E3E', none: '#C4C4C0' };
             const statusIcons = { green: '🟢', yellow: '🟡', red: '🔴', none: '⚪' };
-            const color = statusColors[item.status];
             const icon = statusIcons[item.status];
             const pctDisplay = item.pct !== null ? `${item.pct}%` : '—';
             const barPct = item.pct !== null ? Math.min(item.pct, 100) : 0;
@@ -73,7 +71,7 @@
                     <span class="budget-status-icon">${icon}</span>
                 </div>
                 <div class="budget-amounts">
-                    <span class="budget-spent" style="color:${color}">
+                    <span class="budget-spent status-${item.status}">
                         ${formatCurrency(item.spent)}
                     </span>
                     <span class="budget-sep"> / </span>

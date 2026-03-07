@@ -49,18 +49,117 @@
 
 {% block scripts %}
 <script>
-    const COLORS = [
-        '#2EAADC', '#0F7B6C', '#D9730D', '#E03E3E', '#9B51E0',
-        '#6940A5', '#AD1A72', '#E16259', '#CC8E22', '#448361',
-        '#337EA9', '#CB912F', '#D44C47', '#6C6C6C',
-    ];
-
     let catChart, monthChart;
+    let dashboardData = null;
+
+    function cssVar(name, fallback = '') {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        return value || fallback;
+    }
+
+    function getChartTheme() {
+        return {
+            fontFamily: cssVar('--font', 'Inter, sans-serif'),
+            textColor: cssVar('--text', '#37352F'),
+            mutedColor: cssVar('--text-muted', '#787774'),
+            gridColor: cssVar('--chart-grid', '#F1F1EF'),
+            accent: cssVar('--accent', '#2EAADC'),
+            palette: [
+                cssVar('--accent', '#2EAADC'),
+                cssVar('--positive', '#0F7B6C'),
+                cssVar('--warning', '#D9730D'),
+                cssVar('--negative', '#E03E3E'),
+                cssVar('--purple', '#9B51E0'),
+                '#6940A5', '#AD1A72', '#E16259', '#CC8E22', '#448361',
+                '#337EA9', '#CB912F', '#D44C47', '#6C6C6C',
+            ],
+        };
+    }
+
+    function renderCharts(data) {
+        const theme = getChartTheme();
+
+        const catLabels = Object.keys(data.by_category);
+        const catValues = Object.values(data.by_category);
+
+        if (catChart) catChart.destroy();
+        catChart = new Chart(document.getElementById('categoryChart'), {
+            type: 'doughnut',
+            data: {
+                labels: catLabels,
+                datasets: [{
+                    data: catValues,
+                    backgroundColor: theme.palette.slice(0, catLabels.length),
+                    borderWidth: 0,
+                    hoverOffset: 4,
+                }],
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 12 },
+                            padding: 12,
+                            usePointStyle: true,
+                        },
+                    },
+                },
+                cutout: '65%',
+            },
+        });
+
+        const monthLabels = Object.keys(data.monthly).map(m => {
+            const [y, mo] = m.split('-');
+            return new Date(y, mo - 1).toLocaleDateString('en', { month: 'short', year: '2-digit' });
+        });
+        const monthValues = Object.values(data.monthly);
+
+        if (monthChart) monthChart.destroy();
+        monthChart = new Chart(document.getElementById('monthlyChart'), {
+            type: 'bar',
+            data: {
+                labels: monthLabels,
+                datasets: [{
+                    label: 'Spending',
+                    data: monthValues,
+                    backgroundColor: theme.accent,
+                    borderRadius: 6,
+                    borderSkipped: false,
+                }],
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 11 },
+                            callback: v => '€' + v.toLocaleString(),
+                        },
+                        grid: { color: theme.gridColor },
+                    },
+                    x: {
+                        ticks: {
+                            color: theme.mutedColor,
+                            font: { family: theme.fontFamily, size: 11 },
+                        },
+                        grid: { display: false },
+                    },
+                },
+            },
+        });
+    }
 
     async function loadDashboard() {
         try {
             const res = await fetch('/api/summary');
             const data = await res.json();
+            dashboardData = data;
 
             // Cards
             document.getElementById('totalSpent').textContent = formatCurrency(data.total_spent);
@@ -77,79 +176,18 @@
                 document.getElementById('subtitle').textContent = monthName;
             } else {
                 document.getElementById('subtitle').textContent = 'No data yet';
-                document.getElementById('cards').insertAdjacentHTML('afterend',
-                    `<div class="empty-state" style="margin:-16px 0 24px;">
-                        <div class="icon">📊</div>
-                        <h3>Your dashboard is empty</h3>
-                        <p>Upload a bank export to see your spending breakdown</p>
-                        <a href="/upload" class="btn btn-primary" style="margin-top:16px;">📤 Upload CSV</a>
-                    </div>`);
+                if (!document.getElementById('dashboardEmptyState')) {
+                    document.getElementById('cards').insertAdjacentHTML('afterend',
+                        `<div class="empty-state" id="dashboardEmptyState" style="margin:-16px 0 24px;">
+                            <div class="icon">📊</div>
+                            <h3>Your dashboard is empty</h3>
+                            <p>Upload a bank export to see your spending breakdown</p>
+                            <a href="/upload" class="btn btn-primary" style="margin-top:16px;">📤 Upload CSV</a>
+                        </div>`);
+                }
             }
 
-            // Category pie chart
-            const catLabels = Object.keys(data.by_category);
-            const catValues = Object.values(data.by_category);
-
-            if (catChart) catChart.destroy();
-            catChart = new Chart(document.getElementById('categoryChart'), {
-                type: 'doughnut',
-                data: {
-                    labels: catLabels,
-                    datasets: [{
-                        data: catValues,
-                        backgroundColor: COLORS.slice(0, catLabels.length),
-                        borderWidth: 0,
-                        hoverOffset: 4,
-                    }],
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: { font: { family: 'Inter', size: 12 }, padding: 12, usePointStyle: true },
-                        },
-                    },
-                    cutout: '65%',
-                },
-            });
-
-            // Monthly bar chart
-            const monthLabels = Object.keys(data.monthly).map(m => {
-                const [y, mo] = m.split('-');
-                return new Date(y, mo - 1).toLocaleDateString('en', { month: 'short', year: '2-digit' });
-            });
-            const monthValues = Object.values(data.monthly);
-
-            if (monthChart) monthChart.destroy();
-            monthChart = new Chart(document.getElementById('monthlyChart'), {
-                type: 'bar',
-                data: {
-                    labels: monthLabels,
-                    datasets: [{
-                        label: 'Spending',
-                        data: monthValues,
-                        backgroundColor: '#2EAADC',
-                        borderRadius: 6,
-                        borderSkipped: false,
-                    }],
-                },
-                options: {
-                    responsive: true,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: { font: { family: 'Inter', size: 11 }, callback: v => '€' + v.toLocaleString() },
-                            grid: { color: '#F1F1EF' },
-                        },
-                        x: {
-                            ticks: { font: { family: 'Inter', size: 11 } },
-                            grid: { display: false },
-                        },
-                    },
-                },
-            });
+            renderCharts(data);
 
             // Top merchants
             const merchantList = document.getElementById('topMerchants');
@@ -169,6 +207,12 @@
             document.getElementById('subtitle').textContent = 'Error loading data';
         }
     }
+
+    window.addEventListener('spectra-theme-change', () => {
+        if (dashboardData) {
+            renderCharts(dashboardData);
+        }
+    });
 
     loadDashboard();
 </script>
