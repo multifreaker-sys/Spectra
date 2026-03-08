@@ -36,10 +36,7 @@
         const res = await fetch('/api/budget');
         const data = await res.json();
 
-        // Format month title
-        const [y, m] = data.month.split('-');
-        const monthName = new Date(y, m - 1).toLocaleDateString('en', { month: 'long', year: 'numeric' });
-        document.getElementById('budgetSubtitle').textContent = monthName;
+        document.getElementById('budgetSubtitle').textContent = data.current_cycle?.label || 'Current financial cycle';
 
         // Summary cards
         document.getElementById('statOnTrack').textContent = data.summary.on_track;

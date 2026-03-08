@@ -3,7 +3,7 @@
 
 {% block content %}
 <h1 class="page-title">Trends</h1>
-<p class="page-subtitle">Year-over-year financial overview</p>
+<p class="page-subtitle">Year-over-year financial overview by financial cycle</p>
 
 <!-- Year tabs -->
 <div class="year-tabs" id="yearTabs"></div>
@@ -100,6 +100,10 @@
         };
     }
 
+    function formatPeriodTick(periodStart) {
+        return formatSpectraDate(periodStart, { day: 'numeric', month: 'short' });
+    }
+
     async function loadTrends() {
         const res = await fetch('/api/trends');
         trendsData = await res.json();
@@ -152,11 +156,8 @@
 
     function renderMonthlyChart(year) {
         const theme = getTrendTheme();
-        const series = trendsData.monthly_series.filter(m => m.month.startsWith(year));
-        const labels = series.map(m => {
-            const [y, mo] = m.month.split('-');
-            return new Date(y, mo - 1).toLocaleDateString('en', { month: 'short' });
-        });
+        const series = trendsData.period_series.filter(m => m.period_start.startsWith(year));
+        const labels = series.map(m => formatPeriodTick(m.period_start));
 
         if (monthlyChart) monthlyChart.destroy();
         monthlyChart = new Chart(document.getElementById('monthlyChart'), {
@@ -193,6 +194,7 @@
                     },
                     tooltip: {
                         callbacks: {
+                            title: ctx => formatCycleRange(series[ctx[0].dataIndex].period_start, series[ctx[0].dataIndex].period_end),
                             label: ctx => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}`
                         }
                     }

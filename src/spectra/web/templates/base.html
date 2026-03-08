@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="{{ 'dark' if theme_preference == 'dark' else 'light' }}" data-theme-preference="{{ theme_preference|default('auto') }}">
 
 <head>
     <meta charset="UTF-8">
@@ -10,27 +10,49 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌟</text></svg>">
     <script>
+        const SERVER_THEME_PREFERENCE = {{ theme_preference|default('auto')|tojson }};
         const THEME_STORAGE_KEY = 'spectra-theme-preference';
         const THEME_OPTIONS = ['auto', 'light', 'dark'];
 
-        function getStoredThemePreference() {
+        function safeReadStoredThemePreference() {
             try {
-                const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-                return THEME_OPTIONS.includes(stored) ? stored : 'auto';
-            } catch (err) {
-                return 'auto';
+                const value = localStorage.getItem(THEME_STORAGE_KEY);
+                return THEME_OPTIONS.includes(value) ? value : null;
+            } catch (_err) {
+                return null;
             }
+        }
+
+        function safeStoreThemePreference(preference) {
+            try {
+                localStorage.setItem(THEME_STORAGE_KEY, preference);
+            } catch (_err) {
+                // Ignore storage failures (private mode, disabled storage, etc.)
+            }
+        }
+
+        function getThemePreference() {
+            if (window.__spectraTheme?.preference && THEME_OPTIONS.includes(window.__spectraTheme.preference)) {
+                return window.__spectraTheme.preference;
+            }
+
+            const stored = safeReadStoredThemePreference();
+            if (stored) {
+                return stored;
+            }
+
+            return THEME_OPTIONS.includes(SERVER_THEME_PREFERENCE) ? SERVER_THEME_PREFERENCE : 'auto';
         }
 
         function getSystemTheme() {
             return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
 
-        function resolveTheme(preference = getStoredThemePreference()) {
+        function resolveTheme(preference = getThemePreference()) {
             return preference === 'auto' ? getSystemTheme() : preference;
         }
 
-        function applyTheme(preference = getStoredThemePreference()) {
+        function applyTheme(preference = getThemePreference()) {
             const effectiveTheme = resolveTheme(preference);
             document.documentElement.dataset.theme = effectiveTheme;
             document.documentElement.dataset.themePreference = preference;
@@ -38,9 +60,9 @@
             return window.__spectraTheme;
         }
 
-        applyTheme();
+        applyTheme(getThemePreference());
     </script>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=20260308a">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 
@@ -143,7 +165,7 @@
         }
 
         function syncThemeSelects() {
-            const preference = getStoredThemePreference();
+            const preference = getThemePreference();
             document.querySelectorAll('[data-theme-select]').forEach(select => {
                 if (select.value !== preference) {
                     select.value = preference;
@@ -153,20 +175,15 @@
 
         function setThemePreference(preference) {
             const normalized = THEME_OPTIONS.includes(preference) ? preference : 'auto';
-            try {
-                window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
-            } catch (err) {
-                // Ignore storage failures and still apply the theme for this session.
-            }
-
             const detail = applyTheme(normalized);
+            safeStoreThemePreference(normalized);
             syncThemeSelects();
             emitThemeChange(detail);
             return detail;
         }
 
         const handleSystemThemeChange = () => {
-            if (getStoredThemePreference() !== 'auto') {
+            if (getThemePreference() !== 'auto') {
                 return;
             }
 
@@ -182,15 +199,29 @@
         }
 
         window.SpectraTheme = {
-            getPreference: getStoredThemePreference,
-            getEffectiveTheme: () => resolveTheme(getStoredThemePreference()),
-            getState: () => window.__spectraTheme || applyTheme(getStoredThemePreference()),
+            getPreference: getThemePreference,
+            getEffectiveTheme: () => resolveTheme(getThemePreference()),
+            getState: () => window.__spectraTheme || applyTheme(getThemePreference()),
             setPreference: setThemePreference,
             getCssVar: (name, fallback = '') => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback,
             syncThemeSelects,
         };
 
         syncThemeSelects();
+
+        function parseSpectraDate(dateString) {
+            return new Date(`${dateString}T00:00:00`);
+        }
+
+        function formatSpectraDate(dateString, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
+            return parseSpectraDate(dateString).toLocaleDateString('en', options);
+        }
+
+        function formatCycleRange(startDate, endExclusiveDate, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
+            const endDate = parseSpectraDate(endExclusiveDate);
+            endDate.setDate(endDate.getDate() - 1);
+            return `${parseSpectraDate(startDate).toLocaleDateString('en', options)} -> ${endDate.toLocaleDateString('en', options)}`;
+        }
 
         function showToast(message, type = 'success') {
             const container = document.getElementById('toastContainer');

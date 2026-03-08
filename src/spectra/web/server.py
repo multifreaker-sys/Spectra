@@ -14,6 +14,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from spectra.config import load_settings
+from spectra.cycles import (
+    DEFAULT_CYCLE_START_DAY,
+    cycle_start_for,
+    cycle_window_for,
+    format_cycle_label,
+    next_cycle_start,
+    normalize_cycle_start_day,
+    parse_iso_date,
+)
 from spectra.db import BookmarkDB
 
 logger = logging.getLogger("spectra.web")
@@ -25,6 +34,11 @@ _STATIC = _HERE / "static"
 app = FastAPI(title="Spectra Dashboard", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 templates = Jinja2Templates(directory=str(_TEMPLATES))
+
+_THEME_SETTING_KEY = "theme_preference"
+_PAY_DAY_SETTING_KEY = "cycle_start_day"
+_VALID_THEME_PREFERENCES = {"auto", "light", "dark"}
+_VALID_SUMMARY_SCOPES = {"cycle", "90d", "ytd"}
 
 
 # ── Global error handler ─────────────────────────────────────────
@@ -50,35 +64,102 @@ def _get_db() -> BookmarkDB:
     return BookmarkDB(settings.db_path)
 
 
+def _load_app_preferences(db: BookmarkDB | None = None) -> dict[str, Any]:
+    owns_db = db is None
+    db = db or _get_db()
+    try:
+        raw_theme = (db.get_app_setting(_THEME_SETTING_KEY, "auto") or "auto").strip().lower()
+        theme_preference = raw_theme if raw_theme in _VALID_THEME_PREFERENCES else "auto"
+
+        raw_pay_day = db.get_app_setting(_PAY_DAY_SETTING_KEY, str(DEFAULT_CYCLE_START_DAY))
+        try:
+            pay_day = normalize_cycle_start_day(int(raw_pay_day or DEFAULT_CYCLE_START_DAY))
+        except (TypeError, ValueError):
+            pay_day = DEFAULT_CYCLE_START_DAY
+    finally:
+        if owns_db:
+            db.close()
+
+    return {
+        "theme_preference": theme_preference,
+        "pay_day": pay_day,
+        # Backward compatibility for older clients.
+        "cycle_start_day": pay_day,
+    }
+
+
+def _build_cycle_payload(pay_day: int):
+    from datetime import date
+
+    cycle_start, cycle_end = cycle_window_for(date.today(), pay_day)
+    return {
+        "start": cycle_start.isoformat(),
+        "end": cycle_end.isoformat(),
+        "label": format_cycle_label(cycle_start, cycle_end),
+        "pay_day": pay_day,
+        # Backward compatibility.
+        "start_day": pay_day,
+    }
+
+
+def _template_context(request: Request) -> dict[str, Any]:
+    return {"request": request, **_load_app_preferences()}
+
+
 # ── Pages ────────────────────────────────────────────────────────
 
 
 @app.get("/", response_class=HTMLResponse)
 async def page_dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse("dashboard.html", _template_context(request))
 
 
 @app.get("/transactions", response_class=HTMLResponse)
 async def page_transactions(request: Request):
-    return templates.TemplateResponse("transactions.html", {"request": request})
+    return templates.TemplateResponse("transactions.html", _template_context(request))
 
 
 @app.get("/upload", response_class=HTMLResponse)
 async def page_upload(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request})
+    return templates.TemplateResponse("upload.html", _template_context(request))
 
 
 @app.get("/settings", response_class=HTMLResponse)
 async def page_settings(request: Request):
-    return templates.TemplateResponse("settings.html", {"request": request})
+    return templates.TemplateResponse("settings.html", _template_context(request))
 
 
 # ── API: Dashboard Summary ───────────────────────────────────────
 
 
 @app.get("/api/summary")
-async def api_summary():
+async def api_summary(scope: str = Query("cycle")):
     """Return dashboard-level stats."""
+    scope = (scope or "cycle").strip().lower()
+    if scope not in _VALID_SUMMARY_SCOPES:
+        return JSONResponse(
+            {"error": "scope must be one of cycle, 90d, ytd"},
+            status_code=400,
+        )
+
+    preferences = _load_app_preferences()
+    pay_day = preferences["pay_day"]
+
+    from datetime import date, timedelta
+
+    today = date.today()
+    if scope == "cycle":
+        period_start, period_end = cycle_window_for(today, pay_day)
+        scope_label = format_cycle_label(period_start, period_end)
+    elif scope == "90d":
+        period_end = today + timedelta(days=1)
+        period_start = period_end - timedelta(days=90)
+        scope_label = f"Last 90 days ({format_cycle_label(period_start, period_end)})"
+    else:  # ytd
+        period_start = date(today.year, 1, 1)
+        period_end = today + timedelta(days=1)
+        scope_label = f"Year to date ({format_cycle_label(period_start, period_end)})"
+
     with _get_db() as db:
         rows = db._conn.execute(
             "SELECT date, clean_name, amount, category FROM tx_history ORDER BY date DESC"
@@ -88,7 +169,10 @@ async def api_summary():
         return {
             "total_spent": 0, "total_income": 0, "subscriptions": 0,
             "uncategorized": 0, "by_category": {}, "monthly": {},
-            "top_merchants": [],
+            "monthly_ranges": {}, "top_merchants": [], "current_cycle": _build_cycle_payload(pay_day),
+            "scope": scope, "scope_label": scope_label,
+            "selected_period": {"start": period_start.isoformat(), "end": period_end.isoformat(), "label": scope_label},
+            "pay_day": pay_day, "cycle_start_day": pay_day, "has_data": False,
         }
 
     from collections import Counter, defaultdict
@@ -99,15 +183,37 @@ async def api_summary():
     uncategorized = 0
     by_category: dict[str, float] = defaultdict(float)
     monthly: dict[str, float] = defaultdict(float)
+    monthly_ranges: dict[str, dict[str, str]] = {}
     merchant_totals: Counter = Counter()
+    in_scope_count = 0
 
-    for date, clean_name, amount, cat in rows:
-        month = date[:7]  # YYYY-MM
+    def _monthly_bucket(tx_date):
+        if scope == "cycle":
+            bucket_start = cycle_start_for(tx_date, pay_day)
+            bucket_end = next_cycle_start(bucket_start, pay_day)
+        else:
+            bucket_start = tx_date.replace(day=1)
+            if bucket_start.month == 12:
+                bucket_end = bucket_start.replace(year=bucket_start.year + 1, month=1)
+            else:
+                bucket_end = bucket_start.replace(month=bucket_start.month + 1)
+        return bucket_start, bucket_end
+
+    for tx_date_str, clean_name, amount, cat in rows:
+        tx_date = parse_iso_date(tx_date_str)
+        if not (period_start <= tx_date < period_end):
+            continue
+
+        in_scope_count += 1
+
+        bucket_start, bucket_end = _monthly_bucket(tx_date)
+        month = bucket_start.isoformat()
+        monthly_ranges[month] = {"start": bucket_start.isoformat(), "end": bucket_end.isoformat()}
 
         if amount < 0:
+            monthly[month] += abs(amount)
             total_spent += abs(amount)
             by_category[cat] += abs(amount)
-            monthly[month] += abs(amount)
             merchant_totals[clean_name] += abs(amount)
         else:
             total_income += amount
@@ -120,6 +226,7 @@ async def api_summary():
     # Last 6 months
     sorted_months = sorted(monthly.keys())[-6:]
     monthly_data = {m: round(monthly[m], 2) for m in sorted_months}
+    monthly_ranges_data = {m: monthly_ranges[m] for m in sorted_months}
 
     # Top 5
     top5 = [{"name": n, "total": round(t, 2)} for n, t in merchant_totals.most_common(5)]
@@ -131,7 +238,19 @@ async def api_summary():
         "uncategorized": uncategorized,
         "by_category": {k: round(v, 2) for k, v in sorted(by_category.items(), key=lambda x: -x[1])},
         "monthly": monthly_data,
+        "monthly_ranges": monthly_ranges_data,
         "top_merchants": top5,
+        "current_cycle": _build_cycle_payload(pay_day),
+        "scope": scope,
+        "scope_label": scope_label,
+        "selected_period": {
+            "start": period_start.isoformat(),
+            "end": period_end.isoformat(),
+            "label": scope_label,
+        },
+        "pay_day": pay_day,
+        "cycle_start_day": pay_day,
+        "has_data": in_scope_count > 0,
     }
 
 
@@ -239,6 +358,7 @@ async def api_settings():
     """Return current config for the settings page."""
     settings = load_settings()
     with _get_db() as db:
+        preferences = _load_app_preferences(db)
         tx_count = db._conn.execute("SELECT COUNT(*) FROM tx_history").fetchone()[0]
         merchant_count = db._conn.execute("SELECT COUNT(*) FROM merchant_categories").fetchone()[0]
         cats = db._conn.execute(
@@ -252,6 +372,49 @@ async def api_settings():
         "merchant_count": merchant_count,
         "category_count": len(cats),
         "sheets_connected": bool(settings.spreadsheet_id),
+        **preferences,
+        "current_cycle": _build_cycle_payload(preferences["pay_day"]),
+    }
+
+
+@app.patch("/api/settings/preferences")
+async def api_update_preferences(request: Request):
+    """Save dashboard-local preferences such as theme and cycle start day."""
+    body = await request.json()
+    updates: dict[str, str] = {}
+
+    if "theme_preference" in body:
+        theme_preference = str(body.get("theme_preference", "")).strip().lower()
+        if theme_preference not in _VALID_THEME_PREFERENCES:
+            return JSONResponse(
+                {"error": "theme_preference must be one of auto, light, dark"},
+                status_code=400,
+            )
+        updates[_THEME_SETTING_KEY] = theme_preference
+
+    raw_pay_day = body.get("pay_day", body.get("cycle_start_day"))
+    if raw_pay_day is not None:
+        try:
+            pay_day = normalize_cycle_start_day(int(raw_pay_day))
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"error": "pay_day must be an integer between 1 and 31"},
+                status_code=400,
+            )
+        updates[_PAY_DAY_SETTING_KEY] = str(pay_day)
+
+    if not updates:
+        return JSONResponse({"error": "No supported preference fields provided"}, status_code=400)
+
+    with _get_db() as db:
+        for key, value in updates.items():
+            db.set_app_setting(key, value)
+        preferences = _load_app_preferences(db)
+
+    return {
+        "ok": True,
+        **preferences,
+        "current_cycle": _build_cycle_payload(preferences["pay_day"]),
     }
 
 
@@ -512,21 +675,20 @@ async def page_trends(request: Request):
 @app.get("/api/budget")
 async def api_budget():
     """Return per-category budget status for the current month."""
-    from datetime import date
-    from collections import defaultdict
-
-    current_month = date.today().strftime("%Y-%m")
+    preferences = _load_app_preferences()
+    pay_day = preferences["pay_day"]
+    current_cycle = _build_cycle_payload(pay_day)
 
     with _get_db() as db:
-        # All expense rows for the current month
+        # All expense rows for the current financial cycle
         rows = db._conn.execute(
             """
             SELECT category, SUM(amount) as total
             FROM tx_history
-            WHERE amount < 0 AND date LIKE ?
+            WHERE amount < 0 AND date >= ? AND date < ?
             GROUP BY category
             """,
-            (f"{current_month}%",),
+            (current_cycle["start"], current_cycle["end"]),
         ).fetchall()
 
         limits = db.get_budget_limits()
@@ -575,7 +737,7 @@ async def api_budget():
     no_limit = sum(1 for i in items if i["status"] == "none")
 
     return {
-        "month": current_month,
+        "current_cycle": current_cycle,
         "items": items,
         "summary": {"on_track": on_track, "over": over, "no_limit": no_limit},
     }
@@ -603,13 +765,16 @@ async def api_trends():
     """Return year-over-year financial data for the Trends page."""
     from collections import defaultdict
 
+    preferences = _load_app_preferences()
+    pay_day = preferences["pay_day"]
+
     with _get_db() as db:
         rows = db._conn.execute(
             "SELECT date, amount, category FROM tx_history ORDER BY date ASC"
         ).fetchall()
 
     if not rows:
-        return {"years": [], "by_year": {}, "monthly": {}}
+        return {"years": [], "by_year": {}, "period_series": [], "pay_day": pay_day, "cycle_start_day": pay_day}
 
     # Aggregate by year and month
     by_year: dict[str, dict] = {}
@@ -618,8 +783,10 @@ async def api_trends():
     cat_by_year: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
     for date_str, amount, category in rows:
-        year = date_str[:4]
-        month = date_str[:7]  # YYYY-MM
+        tx_date = parse_iso_date(date_str)
+        cycle_start = cycle_start_for(tx_date, pay_day)
+        year = str(cycle_start.year)
+        month = cycle_start.isoformat()
 
         if year not in by_year:
             by_year[year] = {"income": 0.0, "expenses": 0.0}
@@ -655,7 +822,8 @@ async def api_trends():
     all_months = sorted(set(monthly_income) | set(monthly_expense))
     monthly_series = [
         {
-            "month": m,
+            "period_start": m,
+            "period_end": next_cycle_start(parse_iso_date(m), pay_day).isoformat(),
             "income": round(monthly_income.get(m, 0), 2),
             "expenses": round(monthly_expense.get(m, 0), 2),
         }
@@ -665,7 +833,9 @@ async def api_trends():
     return {
         "years": years,
         "by_year": year_stats,
-        "monthly_series": monthly_series,
+        "period_series": monthly_series,
+        "pay_day": pay_day,
+        "cycle_start_day": pay_day,
     }
 
 

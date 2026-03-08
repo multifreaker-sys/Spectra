@@ -4,14 +4,22 @@
 {% block content %}
 <h1 class="page-title">Dashboard</h1>
 <p class="page-subtitle" id="subtitle">Loading...</p>
+<div class="dashboard-controls">
+    <label for="summaryScope" class="dashboard-controls-label">Period</label>
+    <select id="summaryScope" class="settings-select dashboard-scope-select">
+        <option value="cycle">Current cycle</option>
+        <option value="90d">Last 90 days</option>
+        <option value="ytd">Year to date</option>
+    </select>
+</div>
 
 <div class="cards" id="cards">
     <div class="card">
-        <div class="card-label">Total Spent</div>
+        <div class="card-label" id="spentLabel">Cycle Spend</div>
         <div class="card-value negative" id="totalSpent">—</div>
     </div>
     <div class="card">
-        <div class="card-label">Income</div>
+        <div class="card-label" id="incomeLabel">Cycle Income</div>
         <div class="card-value positive" id="totalIncome">—</div>
     </div>
     <div class="card">
@@ -51,6 +59,50 @@
 <script>
     let catChart, monthChart;
     let dashboardData = null;
+    const DASHBOARD_SCOPE_STORAGE_KEY = 'spectra-summary-scope';
+    const VALID_SUMMARY_SCOPES = ['cycle', '90d', 'ytd'];
+
+    function normalizeScope(value) {
+        return VALID_SUMMARY_SCOPES.includes(value) ? value : 'cycle';
+    }
+
+    function getScope() {
+        try {
+            return normalizeScope(localStorage.getItem(DASHBOARD_SCOPE_STORAGE_KEY));
+        } catch (_err) {
+            return 'cycle';
+        }
+    }
+
+    function setScope(scope) {
+        const normalized = normalizeScope(scope);
+        try {
+            localStorage.setItem(DASHBOARD_SCOPE_STORAGE_KEY, normalized);
+        } catch (_err) {
+            // Ignore storage errors.
+        }
+        return normalized;
+    }
+
+    function updateScopeUI(scope) {
+        const scopeSelect = document.getElementById('summaryScope');
+        if (scopeSelect) {
+            scopeSelect.value = scope;
+        }
+
+        const spentLabel = document.getElementById('spentLabel');
+        const incomeLabel = document.getElementById('incomeLabel');
+        if (scope === 'cycle') {
+            spentLabel.textContent = 'Cycle Spend';
+            incomeLabel.textContent = 'Cycle Income';
+        } else if (scope === '90d') {
+            spentLabel.textContent = '90d Spend';
+            incomeLabel.textContent = '90d Income';
+        } else {
+            spentLabel.textContent = 'YTD Spend';
+            incomeLabel.textContent = 'YTD Income';
+        }
+    }
 
     function cssVar(name, fallback = '') {
         const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -111,9 +163,12 @@
             },
         });
 
-        const monthLabels = Object.keys(data.monthly).map(m => {
-            const [y, mo] = m.split('-');
-            return new Date(y, mo - 1).toLocaleDateString('en', { month: 'short', year: '2-digit' });
+        const periodKeys = Object.keys(data.monthly);
+        const monthLabels = periodKeys.map(startDate => {
+            if (data.scope === 'cycle') {
+                return formatSpectraDate(startDate, { day: 'numeric', month: 'short' });
+            }
+            return formatSpectraDate(startDate, { month: 'short', year: '2-digit' });
         });
         const monthValues = Object.values(data.monthly);
 
@@ -132,7 +187,21 @@
             },
             options: {
                 responsive: true,
-                plugins: { legend: { display: false } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: context => {
+                                const key = periodKeys[context[0].dataIndex];
+                                const range = data.monthly_ranges?.[key];
+                                if (!range) {
+                                    return monthLabels[context[0].dataIndex];
+                                }
+                                return formatCycleRange(range.start, range.end, { day: 'numeric', month: 'short', year: 'numeric' });
+                            },
+                        },
+                    },
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -155,9 +224,12 @@
         });
     }
 
-    async function loadDashboard() {
+    async function loadDashboard(scope = getScope()) {
         try {
-            const res = await fetch('/api/summary');
+            const normalizedScope = normalizeScope(scope);
+            updateScopeUI(normalizedScope);
+
+            const res = await fetch(`/api/summary?scope=${encodeURIComponent(normalizedScope)}`);
             const data = await res.json();
             dashboardData = data;
 
@@ -167,14 +239,9 @@
             document.getElementById('subscriptions').textContent = formatCurrency(data.subscriptions);
             document.getElementById('uncategorized').textContent = data.uncategorized;
 
-            // Subtitle
-            const months = Object.keys(data.monthly);
-            if (months.length > 0) {
-                const latest = months[months.length - 1];
-                const [y, m] = latest.split('-');
-                const monthName = new Date(y, m - 1).toLocaleDateString('en', { month: 'long', year: 'numeric' });
-                document.getElementById('subtitle').textContent = monthName;
-            } else {
+            document.getElementById('subtitle').textContent = data.scope_label || data.current_cycle?.label || 'Selected period';
+
+            if (!data.has_data) {
                 document.getElementById('subtitle').textContent = 'No data yet';
                 if (!document.getElementById('dashboardEmptyState')) {
                     document.getElementById('cards').insertAdjacentHTML('afterend',
@@ -192,7 +259,7 @@
             // Top merchants
             const merchantList = document.getElementById('topMerchants');
             if (data.top_merchants.length === 0) {
-                merchantList.innerHTML = '<li class="empty-state"><p>No data yet</p></li>';
+                merchantList.innerHTML = '<li class="empty-state"><p>No spending in this period yet</p></li>';
             } else {
                 merchantList.innerHTML = data.top_merchants.map((m, i) => `
                 <li class="merchant-item">
@@ -212,6 +279,11 @@
         if (dashboardData) {
             renderCharts(dashboardData);
         }
+    });
+
+    document.getElementById('summaryScope')?.addEventListener('change', event => {
+        const scope = setScope(event.target.value);
+        loadDashboard(scope);
     });
 
     loadDashboard();

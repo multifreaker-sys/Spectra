@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS budget_limits (
     category    TEXT PRIMARY KEY,
     monthly_limit REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
+);
 """
 
 
@@ -72,6 +77,12 @@ class BookmarkDB:
             CREATE TABLE IF NOT EXISTS budget_limits (
                 category      TEXT PRIMARY KEY,
                 monthly_limit REAL NOT NULL
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             )
         """)
         self._conn.commit()
@@ -186,6 +197,22 @@ class BookmarkDB:
         self._conn.execute(
             "INSERT OR REPLACE INTO budget_limits (category, monthly_limit) VALUES (?, ?)",
             (category, monthly_limit),
+        )
+        self._conn.commit()
+
+    def get_app_setting(self, key: str, default: str | None = None) -> str | None:
+        """Return a persisted app setting by key."""
+        row = self._conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+        return row[0] if row else default
+
+    def set_app_setting(self, key: str, value: str) -> None:
+        """Persist a simple app setting."""
+        self._conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+            (key, value),
         )
         self._conn.commit()
 

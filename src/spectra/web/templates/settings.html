@@ -3,7 +3,7 @@
 
 {% block content %}
 <h1 class="page-title">Settings</h1>
-<p class="page-subtitle">Managed via .env file — shown here as read-only reference</p>
+<p class="page-subtitle">Local dashboard preferences plus active environment overview</p>
 
 <div class="settings-group">
     <h3>Appearance</h3>
@@ -19,6 +19,42 @@
                 <option value="dark">Dark</option>
             </select>
             <span class="settings-badge" id="themeStatus">—</span>
+        </div>
+    </div>
+</div>
+
+<div class="settings-group">
+    <h3>Financial Cycle</h3>
+    <div class="settings-row">
+        <div class="settings-label">
+            Financial month starts on
+            <small>Choose your payday (1-31). Each cycle covers that day plus the next 30 days.</small>
+        </div>
+        <div class="settings-control-group">
+            <div class="day-stepper">
+                <button class="day-stepper-btn" type="button" onclick="adjustCycleDayStep(-1)" aria-label="Decrease day">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <div class="day-stepper-value">
+                    <span id="cycleStartDayNum">1</span><span class="day-stepper-ord" id="cycleStartDayOrd">st</span>
+                </div>
+                <button class="day-stepper-btn" type="button" onclick="adjustCycleDayStep(1)" aria-label="Increase day">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+            </div>
+            <input type="hidden" id="cycleStartDay" value="1">
+            <button class="btn btn-primary btn-sm" id="saveCycleBtn" type="button" onclick="saveCyclePreference()">Save</button>
+        </div>
+    </div>
+    <div class="settings-row">
+        <div class="settings-label">
+            Current Cycle
+            <small>Dashboard, budget, and trends use this date range</small>
+        </div>
+        <div class="cycle-range-display" id="cyclePreview">
+            <span class="cycle-range-date" id="cycleRangeStart">—</span>
+            <svg class="cycle-range-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            <span class="cycle-range-date" id="cycleRangeEnd">—</span>
         </div>
     </div>
 </div>
@@ -102,6 +138,34 @@
 
 {% block scripts %}
 <script>
+    function ordSuffix(d) {
+        if (d >= 11 && d <= 13) return 'th';
+        switch (d % 10) {
+            case 1: return 'st';
+            case 2: return 'nd';
+            case 3: return 'rd';
+            default: return 'th';
+        }
+    }
+
+    function getCycleDayValue() {
+        return parseInt(document.getElementById('cycleStartDay').value, 10) || 1;
+    }
+
+    function setCycleDayValue(day) {
+        const clamped = Math.max(1, Math.min(31, day));
+        document.getElementById('cycleStartDay').value = String(clamped);
+        document.getElementById('cycleStartDayNum').textContent = String(clamped);
+        document.getElementById('cycleStartDayOrd').textContent = ordSuffix(clamped);
+    }
+
+    function adjustCycleDayStep(delta) {
+        const current = getCycleDayValue();
+        // Wrap: dec from 1 -> 31, inc from 31 -> 1
+        const next = ((current - 1 + delta + 31) % 31) + 1;
+        setCycleDayValue(next);
+    }
+
     function updateThemePreferenceUI(state = window.SpectraTheme?.getState()) {
         const select = document.getElementById('themePreference');
         const badge = document.getElementById('themeStatus');
@@ -128,16 +192,33 @@
 
         updateThemePreferenceUI(window.SpectraTheme.getState());
 
-        select.addEventListener('change', event => {
-            const state = window.SpectraTheme.setPreference(event.target.value);
-            updateThemePreferenceUI(state);
+        select.addEventListener('change', async event => {
+            const target = event.target;
+            const nextPreference = target.value;
+            target.disabled = true;
 
-            const labels = {
-                auto: 'Theme set to Auto',
-                light: 'Theme set to Light',
-                dark: 'Theme set to Dark',
-            };
-            showToast(labels[state.preference] || 'Theme updated', 'info');
+            const immediateState = window.SpectraTheme.setPreference(nextPreference);
+            updateThemePreferenceUI(immediateState);
+
+            try {
+                const res = await fetch('/api/settings/preferences', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ theme_preference: nextPreference }),
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) {
+                    throw new Error(data.error || 'Theme update failed');
+                }
+
+                const state = window.SpectraTheme.setPreference(data.theme_preference);
+                updateThemePreferenceUI(state);
+                showToast(`Theme set to ${data.theme_preference[0].toUpperCase()}${data.theme_preference.slice(1)}`, 'info');
+            } catch (err) {
+                showToast('Theme applied locally. Failed to save preference on server.', 'error');
+            } finally {
+                target.disabled = false;
+            }
         });
 
         window.addEventListener('spectra-theme-change', event => {
@@ -145,10 +226,61 @@
         });
     }
 
+    function updateCycleUI(settings) {
+        setCycleDayValue(settings.pay_day || settings.cycle_start_day || 1);
+        const cycle = settings.current_cycle;
+        if (cycle) {
+            const startFmt = formatSpectraDate(cycle.start, { day: 'numeric', month: 'short', year: 'numeric' });
+            // end is exclusive — subtract 1 day for display
+            const endExclusive = parseSpectraDate(cycle.end);
+            endExclusive.setDate(endExclusive.getDate() - 1);
+            const endFmt = endExclusive.toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' });
+            const startEl = document.getElementById('cycleRangeStart');
+            const endEl = document.getElementById('cycleRangeEnd');
+            if (startEl) startEl.textContent = startFmt;
+            if (endEl) endEl.textContent = endFmt;
+        }
+    }
+
+    async function saveCyclePreference() {
+        const button = document.getElementById('saveCycleBtn');
+        if (!button) return;
+
+        button.disabled = true;
+        const previousLabel = button.textContent;
+        button.textContent = '...';
+
+        try {
+            const res = await fetch('/api/settings/preferences', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pay_day: getCycleDayValue() }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                throw new Error(data.error || 'Financial cycle update failed');
+            }
+
+            updateCycleUI(data);
+            showToast(`Cycle updated: ${data.current_cycle.label}`);
+        } catch (err) {
+            showToast(err.message || 'Financial cycle update failed', 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = previousLabel;
+        }
+    }
+
     async function loadSettings() {
         try {
             const res = await fetch('/api/settings');
             const s = await res.json();
+
+            if (window.SpectraTheme) {
+                const state = window.SpectraTheme.setPreference(s.theme_preference || 'auto');
+                updateThemePreferenceUI(state);
+            }
+            updateCycleUI(s);
 
             // Provider badge
             const provEl = document.getElementById('provider');
@@ -247,6 +379,7 @@
         }
     }
 
+    setCycleDayValue(1);
     initThemePreference();
     loadSettings();
 </script>

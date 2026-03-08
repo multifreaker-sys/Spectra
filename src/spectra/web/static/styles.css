@@ -287,6 +287,25 @@ body {
     margin-bottom: 32px;
 }
 
+.dashboard-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin: -16px 0 24px;
+}
+
+.dashboard-controls-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+
+.dashboard-scope-select {
+    min-width: 170px;
+}
+
 /* ─── Cards Grid ───────────────────────────────────────────────── */
 
 .cards {
@@ -721,6 +740,11 @@ td.amount.income {
     flex-wrap: wrap;
 }
 
+.settings-control-group .btn {
+    min-width: 96px;
+    justify-content: center;
+}
+
 .settings-select {
     min-width: 140px;
     padding: 8px 12px;
@@ -738,6 +762,92 @@ td.amount.income {
 .settings-select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* ─── Day Stepper ──────────────────────────────────────────────── */
+
+.day-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--input-bg);
+    overflow: hidden;
+}
+
+.day-stepper-btn {
+    width: 34px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+    flex-shrink: 0;
+}
+
+.day-stepper-btn:hover {
+    background: var(--interactive-hover);
+    color: var(--accent);
+}
+
+.day-stepper-btn:active {
+    background: var(--interactive-active);
+}
+
+.day-stepper-value {
+    min-width: 52px;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    padding: 0 4px;
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    line-height: 36px;
+    user-select: none;
+}
+
+.day-stepper-ord {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    vertical-align: super;
+    margin-left: 1px;
+}
+
+/* ─── Cycle Range Display ──────────────────────────────────────── */
+
+.cycle-range-display {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: var(--radius);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-light);
+    font-size: 13px;
+}
+
+.cycle-range-date {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.cycle-range-arrow {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.btn-sm {
+    padding: 6px 14px;
+    font-size: 13px;
+    height: 36px;
 }
 
 .settings-badge {
@@ -1351,6 +1461,17 @@ td.amount.income {
     .settings-control-group {
         width: 100%;
         justify-content: flex-start;
+    }
+
+    .dashboard-controls {
+        width: 100%;
+        margin-top: -12px;
+        margin-bottom: 20px;
+    }
+
+    .dashboard-scope-select {
+        width: 100%;
+        min-width: 0;
     }
 
     .table-toolbar input,
