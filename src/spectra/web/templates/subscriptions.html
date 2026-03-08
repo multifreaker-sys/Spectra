@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Subscriptions — Spectra{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Subscriptions</h1>
+<p class="page-subtitle" id="subscriptionsSubtitle">Loading recurring charges...</p>
+
+<div class="cards" id="subscriptionsCards">
+    <div class="card">
+        <div class="card-label">Active</div>
+        <div class="card-value neutral" id="subsActive">—</div>
+    </div>
+    <div class="card">
+        <div class="card-label">Monthly Estimate</div>
+        <div class="card-value warning" id="subsMonthly">—</div>
+    </div>
+    <div class="card">
+        <div class="card-label">Annual Projection</div>
+        <div class="card-value negative" id="subsAnnual">—</div>
+    </div>
+    <div class="card">
+        <div class="card-label">This Cycle</div>
+        <div class="card-value neutral" id="subsCycle">—</div>
+    </div>
+</div>
+
+<div class="table-container">
+    <div id="subscriptionsTableBody">
+        <div class="empty-state">
+            <div class="icon">🔁</div>
+            <h3>Loading...</h3>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let subscriptionsData = [];
+    let sortState = { key: 'monthly_estimate', direction: 'desc' };
+
+    function cadenceLabel(days) {
+        if (days <= 8) return 'Weekly';
+        if (days <= 40) return 'Monthly';
+        if (days >= 300) return 'Yearly';
+        return 'Custom';
+    }
+
+    function cadenceClass(days) {
+        if (days <= 8) return 'cadence-weekly';
+        if (days <= 40) return 'cadence-monthly';
+        if (days >= 300) return 'cadence-yearly';
+        return 'cadence-custom';
+    }
+
+    function sortItems(items) {
+        const sorted = [...items];
+        const { key, direction } = sortState;
+        const factor = direction === 'asc' ? 1 : -1;
+
+        sorted.sort((a, b) => {
+            const av = a[key];
+            const bv = b[key];
+            if (typeof av === 'number' && typeof bv === 'number') {
+                return (av - bv) * factor;
+            }
+            return String(av || '').localeCompare(String(bv || '')) * factor;
+        });
+
+        return sorted;
+    }
+
+    function sortIndicator(key) {
+        if (sortState.key !== key) {
+            return '↕';
+        }
+        return sortState.direction === 'asc' ? '↑' : '↓';
+    }
+
+    function toggleSort(key) {
+        if (sortState.key === key) {
+            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortState = { key, direction: key === 'merchant' ? 'asc' : 'desc' };
+        }
+        renderSubscriptions(subscriptionsData);
+    }
+
+    function renderSubscriptions(items) {
+        const container = document.getElementById('subscriptionsTableBody');
+
+        if (!items.length) {
+            container.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">🔁</div>
+                <h3>No recurring subscriptions found</h3>
+                <p>Once recurring charges are detected, they will appear here.</p>
+            </div>`;
+            return;
+        }
+
+        const sortedItems = sortItems(items);
+
+        const rows = sortedItems.map(item => `
+            <tr>
+                <td>${item.merchant}</td>
+                <td>
+                    <span class="cadence-badge ${cadenceClass(item.cadence_days)}">${cadenceLabel(item.cadence_days)}</span>
+                    <span class="cadence-days">${item.cadence_days}d</span>
+                </td>
+                <td>${formatSpectraDate(item.last_charge_date)}</td>
+                <td>${formatSpectraDate(item.next_estimated_date)}</td>
+                <td style="text-align:right">${formatCurrency(item.monthly_estimate)}</td>
+                <td style="text-align:right">${formatCurrency(item.in_current_cycle)}</td>
+            </tr>
+        `).join('');
+
+        container.innerHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th class="sortable" onclick="toggleSort('merchant')">Merchant <span class="sort-indicator">${sortIndicator('merchant')}</span></th>
+                        <th class="sortable" onclick="toggleSort('cadence_days')">Cadence <span class="sort-indicator">${sortIndicator('cadence_days')}</span></th>
+                        <th class="sortable" onclick="toggleSort('last_charge_date')">Last Charge <span class="sort-indicator">${sortIndicator('last_charge_date')}</span></th>
+                        <th class="sortable" onclick="toggleSort('next_estimated_date')">Next Est. <span class="sort-indicator">${sortIndicator('next_estimated_date')}</span></th>
+                        <th class="sortable" style="text-align:right" onclick="toggleSort('monthly_estimate')">Monthly <span class="sort-indicator">${sortIndicator('monthly_estimate')}</span></th>
+                        <th class="sortable" style="text-align:right" onclick="toggleSort('in_current_cycle')">Cycle <span class="sort-indicator">${sortIndicator('in_current_cycle')}</span></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    async function loadSubscriptions() {
+        try {
+            const res = await fetch('/api/subscriptions');
+            const data = await res.json();
+
+            document.getElementById('subsActive').textContent = data.summary.active_count;
+            document.getElementById('subsMonthly').textContent = formatCurrency(data.summary.monthly_estimate);
+            document.getElementById('subsAnnual').textContent = formatCurrency(data.summary.annual_projection);
+            document.getElementById('subsCycle').textContent = formatCurrency(data.summary.in_current_cycle);
+            document.getElementById('subscriptionsSubtitle').textContent = data.current_cycle?.label || 'Current cycle';
+
+            subscriptionsData = data.items || [];
+            renderSubscriptions(subscriptionsData);
+        } catch (err) {
+            document.getElementById('subscriptionsSubtitle').textContent = 'Failed to load subscriptions';
+            console.error('Subscriptions load error:', err);
+        }
+    }
+
+    loadSubscriptions();
+</script>
+{% endblock %}

@@ -3,7 +3,7 @@
 
 {% block content %}
 <h1 class="page-title">Transactions</h1>
-<p class="page-subtitle">Click a category or merchant to edit it</p>
+<p class="page-subtitle" id="txSubtitle">Click a category or merchant to edit it</p>
 
 <div class="table-container">
     <div class="table-toolbar">
@@ -13,6 +13,18 @@
         </select>
         <input type="date" id="dateFrom" title="From date">
         <input type="date" id="dateTo" title="To date">
+        <button class="btn btn-secondary btn-sm" id="uncatToggleBtn" type="button" onclick="toggleUncategorizedQueue()">Inbox zero: OFF</button>
+    </div>
+
+    <div class="uncategorized-queue" id="uncatQueue" style="display:none;">
+        <div class="uncat-queue-info" id="uncatQueueInfo">Uncategorized queue</div>
+        <div class="uncat-queue-actions">
+            <button class="btn btn-secondary btn-sm" type="button" id="selectAllVisibleBtn" onclick="toggleSelectAllVisible()">Select all visible</button>
+            <select id="bulkCategorySelect" class="settings-select">
+                <option value="">Choose category…</option>
+            </select>
+            <button class="btn btn-primary btn-sm" type="button" onclick="applyBulkCategory()">Apply to selected</button>
+        </div>
     </div>
 
     <div id="tableBody">
@@ -30,9 +42,17 @@
 <script>
     let currentPage = 1;
     let categories = [];
+    let uncategorizedOnly = false;
 
     function themeVar(name, fallback = '') {
         return window.SpectraTheme?.getCssVar(name, fallback) || fallback;
+    }
+
+    function categoryOptionsHtml(selected = '') {
+        return categories.map(cat => {
+            const isSelected = cat === selected ? 'selected' : '';
+            return `<option value="${cat}" ${isSelected}>${cat}</option>`;
+        }).join('');
     }
 
     async function loadCategories() {
@@ -47,6 +67,9 @@
             opt.textContent = c;
             select.appendChild(opt);
         });
+
+        const bulkSelect = document.getElementById('bulkCategorySelect');
+        bulkSelect.innerHTML = '<option value="">Choose category…</option>' + categoryOptionsHtml();
     }
 
     async function loadTransactions(page = 1) {
@@ -58,15 +81,28 @@
 
         const params = new URLSearchParams({ page, per_page: 50 });
         if (search) params.set('search', search);
-        if (category) params.set('category', category);
+        if (category && !uncategorizedOnly) params.set('category', category);
         if (dateFrom) params.set('date_from', dateFrom);
         if (dateTo) params.set('date_to', dateTo);
+        if (uncategorizedOnly) params.set('uncategorized_only', 'true');
 
         const res = await fetch(`/api/transactions?${params}`);
         const data = await res.json();
 
         renderTable(data.transactions);
         renderPagination(data.page, data.pages);
+
+        const subtitle = document.getElementById('txSubtitle');
+        subtitle.textContent = uncategorizedOnly
+            ? `Inbox zero mode — ${data.total} uncategorized transaction(s)`
+            : 'Click a category or merchant to edit it';
+
+        const queue = document.getElementById('uncatQueue');
+        const queueInfo = document.getElementById('uncatQueueInfo');
+        queue.style.display = uncategorizedOnly ? 'flex' : 'none';
+        if (uncategorizedOnly) {
+            queueInfo.textContent = `${data.total} uncategorized on this page set`;
+        }
     }
 
     function renderTable(txns) {
@@ -84,6 +120,7 @@
 
         let html = `<table>
         <thead><tr>
+            <th style="width:40px">✓</th>
             <th>Date</th>
             <th>Merchant</th>
             <th>Category</th>
@@ -96,8 +133,20 @@
             const isUncategorized = t.category === 'Uncategorized';
             const badgeClass = isUncategorized ? 'badge badge-uncategorized' : 'badge';
             const dotColor = isUncategorized ? '' : `background:${getCategoryColor(t.category)}`;
+            const checkbox = isUncategorized
+                ? `<input type="checkbox" class="uncategorized-check" value="${t.id}" aria-label="Select transaction">`
+                : '';
+            const quickCategorySelect = isUncategorized
+                ? `<div class="quick-category-wrap">
+                    <select class="quick-category-select" onchange="applyQuickCategory('${t.id}', this)">
+                        <option value="">Assign…</option>
+                        ${categoryOptionsHtml()}
+                    </select>
+                </div>`
+                : '';
 
             html += `<tr>
+            <td>${checkbox}</td>
             <td>${t.date}</td>
             <td>
                 <span class="editable" onclick="editField(this, '${t.id}', 'merchant')">${t.merchant}</span>
@@ -107,6 +156,7 @@
                     <span class="badge-dot" style="${dotColor}"></span>
                     ${t.category}
                 </span>
+                ${quickCategorySelect}
             </td>
             <td class="amount ${amountClass}" style="text-align:right">${formatCurrency(t.amount)}</td>
         </tr>`;
@@ -114,6 +164,10 @@
 
         html += '</tbody></table>';
         container.innerHTML = html;
+        container.querySelectorAll('.uncategorized-check').forEach(check => {
+            check.addEventListener('change', updateSelectAllButtonState);
+        });
+        updateSelectAllButtonState();
     }
 
     function renderPagination(page, total) {
@@ -139,6 +193,96 @@
             'Transfer In': '#0F7B6C', 'Other Income': '#0F7B6C',
         };
         return colors[cat] || themeVar('--text-muted', '#787774');
+    }
+
+    function selectedUncategorizedIds() {
+        return Array.from(document.querySelectorAll('.uncategorized-check:checked')).map(el => el.value);
+    }
+
+    function updateSelectAllButtonState() {
+        const btn = document.getElementById('selectAllVisibleBtn');
+        if (!btn) {
+            return;
+        }
+
+        const allChecks = Array.from(document.querySelectorAll('.uncategorized-check'));
+        const checked = allChecks.filter(el => el.checked).length;
+        if (!allChecks.length) {
+            btn.textContent = 'Select all visible';
+            btn.disabled = true;
+            return;
+        }
+
+        btn.disabled = false;
+        btn.textContent = checked === allChecks.length ? 'Clear selection' : 'Select all visible';
+    }
+
+    function toggleSelectAllVisible() {
+        const allChecks = Array.from(document.querySelectorAll('.uncategorized-check'));
+        if (!allChecks.length) {
+            return;
+        }
+
+        const shouldSelectAll = allChecks.some(el => !el.checked);
+        allChecks.forEach(el => {
+            el.checked = shouldSelectAll;
+        });
+        updateSelectAllButtonState();
+    }
+
+    async function applyBulkCategory() {
+        const ids = selectedUncategorizedIds();
+        const category = document.getElementById('bulkCategorySelect').value;
+        if (!ids.length) {
+            showToast('Select at least one uncategorized transaction', 'info');
+            return;
+        }
+        if (!category) {
+            showToast('Choose a category first', 'error');
+            return;
+        }
+
+        const res = await fetch('/api/transactions/bulk-category', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, category }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            showToast(data.error || 'Bulk update failed', 'error');
+            return;
+        }
+
+        showToast(`Updated ${data.updated} transaction(s)`);
+        loadTransactions(currentPage);
+    }
+
+    async function applyQuickCategory(txId, selectEl) {
+        const category = selectEl.value;
+        if (!category) {
+            return;
+        }
+
+        const res = await fetch(`/api/transactions/${txId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            showToast(data.error || 'Category update failed', 'error');
+            return;
+        }
+
+        showToast('Category updated');
+        loadTransactions(currentPage);
+    }
+
+    function toggleUncategorizedQueue() {
+        uncategorizedOnly = !uncategorizedOnly;
+        document.getElementById('uncatToggleBtn').textContent = `Inbox zero: ${uncategorizedOnly ? 'ON' : 'OFF'}`;
+        document.getElementById('categoryFilter').disabled = uncategorizedOnly;
+        loadTransactions(1);
     }
 
     function editField(el, txId, field) {

@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from spectra.config import load_settings
 from spectra.cycles import (
     DEFAULT_CYCLE_START_DAY,
+    MAX_CYCLE_START_DAY,
     cycle_start_for,
     cycle_window_for,
     format_cycle_label,
@@ -24,6 +25,8 @@ from spectra.cycles import (
     parse_iso_date,
 )
 from spectra.db import BookmarkDB
+from spectra.recurring import detect_recurring_kind
+from spectra.rules import VALID_RULE_TYPES, normalize_rule_type
 
 logger = logging.getLogger("spectra.web")
 
@@ -73,7 +76,10 @@ def _load_app_preferences(db: BookmarkDB | None = None) -> dict[str, Any]:
 
         raw_pay_day = db.get_app_setting(_PAY_DAY_SETTING_KEY, str(DEFAULT_CYCLE_START_DAY))
         try:
-            pay_day = normalize_cycle_start_day(int(raw_pay_day or DEFAULT_CYCLE_START_DAY))
+            raw_int = int(raw_pay_day or DEFAULT_CYCLE_START_DAY)
+            # Clamp legacy values (29-31) into valid range
+            clamped = max(1, min(raw_int, MAX_CYCLE_START_DAY))
+            pay_day = normalize_cycle_start_day(clamped)
         except (TypeError, ValueError):
             pay_day = DEFAULT_CYCLE_START_DAY
     finally:
@@ -89,7 +95,7 @@ def _load_app_preferences(db: BookmarkDB | None = None) -> dict[str, Any]:
 
 
 def _build_cycle_payload(pay_day: int):
-    from datetime import date
+    from datetime import date, timedelta
 
     cycle_start, cycle_end = cycle_window_for(date.today(), pay_day)
     return {
@@ -99,6 +105,24 @@ def _build_cycle_payload(pay_day: int):
         "pay_day": pay_day,
         # Backward compatibility.
         "start_day": pay_day,
+    }
+
+
+def _build_cycle_burn_rate(*, today, period_start, period_end, total_spent: float) -> dict[str, Any]:
+    """Estimate end-of-cycle spend based on the current daily burn."""
+    total_days = max((period_end - period_start).days, 1)
+    elapsed_days = min(max((today - period_start).days + 1, 1), total_days)
+    remaining_days = max(total_days - elapsed_days, 0)
+    daily_spend = total_spent / elapsed_days
+    projected_total = daily_spend * total_days
+
+    return {
+        "elapsed_days": elapsed_days,
+        "total_days": total_days,
+        "remaining_days": remaining_days,
+        "spent_so_far": round(total_spent, 2),
+        "daily_spend": round(daily_spend, 2),
+        "projected_total": round(projected_total, 2),
     }
 
 
@@ -127,6 +151,11 @@ async def page_upload(request: Request):
 @app.get("/settings", response_class=HTMLResponse)
 async def page_settings(request: Request):
     return templates.TemplateResponse("settings.html", _template_context(request))
+
+
+@app.get("/subscriptions", response_class=HTMLResponse)
+async def page_subscriptions(request: Request):
+    return templates.TemplateResponse("subscriptions.html", _template_context(request))
 
 
 # ── API: Dashboard Summary ───────────────────────────────────────
@@ -160,6 +189,17 @@ async def api_summary(scope: str = Query("cycle")):
         period_end = today + timedelta(days=1)
         scope_label = f"Year to date ({format_cycle_label(period_start, period_end)})"
 
+    burn_rate = (
+        _build_cycle_burn_rate(
+            today=today,
+            period_start=period_start,
+            period_end=period_end,
+            total_spent=0.0,
+        )
+        if scope == "cycle"
+        else None
+    )
+
     with _get_db() as db:
         rows = db._conn.execute(
             "SELECT date, clean_name, amount, category FROM tx_history ORDER BY date DESC"
@@ -173,6 +213,7 @@ async def api_summary(scope: str = Query("cycle")):
             "scope": scope, "scope_label": scope_label,
             "selected_period": {"start": period_start.isoformat(), "end": period_end.isoformat(), "label": scope_label},
             "pay_day": pay_day, "cycle_start_day": pay_day, "has_data": False,
+            "burn_rate": burn_rate,
         }
 
     from collections import Counter, defaultdict
@@ -231,6 +272,14 @@ async def api_summary(scope: str = Query("cycle")):
     # Top 5
     top5 = [{"name": n, "total": round(t, 2)} for n, t in merchant_totals.most_common(5)]
 
+    if scope == "cycle":
+        burn_rate = _build_cycle_burn_rate(
+            today=today,
+            period_start=period_start,
+            period_end=period_end,
+            total_spent=total_spent,
+        )
+
     return {
         "total_spent": round(total_spent, 2),
         "total_income": round(total_income, 2),
@@ -251,6 +300,7 @@ async def api_summary(scope: str = Query("cycle")):
         "pay_day": pay_day,
         "cycle_start_day": pay_day,
         "has_data": in_scope_count > 0,
+        "burn_rate": burn_rate,
     }
 
 
@@ -262,6 +312,7 @@ async def api_transactions(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=10, le=200),
     category: str = Query("", alias="category"),
+    uncategorized_only: bool = Query(False),
     search: str = Query(""),
     date_from: str = Query(""),
     date_to: str = Query(""),
@@ -277,6 +328,8 @@ async def api_transactions(
 
         # Filters
         if category and cat.lower() != category.lower():
+            continue
+        if uncategorized_only and cat != "Uncategorized":
             continue
         if search and search.lower() not in clean_name.lower():
             continue
@@ -300,6 +353,7 @@ async def api_transactions(
     return {
         "transactions": page_data,
         "total": total,
+        "uncategorized_total": sum(1 for tx in results if tx["category"] == "Uncategorized"),
         "page": page,
         "per_page": per_page,
         "pages": max(1, (total + per_page - 1) // per_page),
@@ -335,6 +389,41 @@ async def api_update_transaction(tx_id: str, request: Request):
             db._conn.commit()
 
     return {"ok": True, "id": tx_id}
+
+
+@app.post("/api/transactions/bulk-category")
+async def api_bulk_update_category(request: Request):
+    """Apply one category to multiple transactions quickly."""
+    body = await request.json()
+    ids = body.get("ids") or []
+    category = str(body.get("category") or "").strip()
+
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse({"error": "ids must be a non-empty list"}, status_code=400)
+    if not category:
+        return JSONResponse({"error": "category is required"}, status_code=400)
+
+    cleaned_ids = [str(v).strip() for v in ids if str(v).strip()]
+    if not cleaned_ids:
+        return JSONResponse({"error": "ids must contain valid transaction IDs"}, status_code=400)
+
+    with _get_db() as db:
+        placeholders = ",".join("?" for _ in cleaned_ids)
+        merchant_rows = db._conn.execute(
+            f"SELECT DISTINCT clean_name FROM tx_history WHERE tx_id IN ({placeholders})",
+            cleaned_ids,
+        ).fetchall()
+        db._conn.execute(
+            f"UPDATE tx_history SET category = ? WHERE tx_id IN ({placeholders})",
+            [category, *cleaned_ids],
+        )
+        db._conn.commit()
+
+        for (merchant_name,) in merchant_rows:
+            if merchant_name:
+                db.save_merchant_category(merchant_name, category)
+
+    return {"ok": True, "updated": len(cleaned_ids), "category": category}
 
 
 # ── API: Categories ──────────────────────────────────────────────
@@ -398,7 +487,7 @@ async def api_update_preferences(request: Request):
             pay_day = normalize_cycle_start_day(int(raw_pay_day))
         except (TypeError, ValueError):
             return JSONResponse(
-                {"error": "pay_day must be an integer between 1 and 31"},
+                {"error": f"pay_day must be an integer between 1 and {MAX_CYCLE_START_DAY}"},
                 status_code=400,
             )
         updates[_PAY_DAY_SETTING_KEY] = str(pay_day)
@@ -416,6 +505,56 @@ async def api_update_preferences(request: Request):
         **preferences,
         "current_cycle": _build_cycle_payload(preferences["pay_day"]),
     }
+
+
+@app.get("/api/settings/rules")
+async def api_get_category_rules():
+    """Return user-defined categorization rules."""
+    with _get_db() as db:
+        rules = db.get_category_rules()
+    return {"rules": rules, "valid_rule_types": sorted(VALID_RULE_TYPES)}
+
+
+@app.post("/api/settings/rules")
+async def api_create_category_rule(request: Request):
+    """Create a categorization rule (contains/regex => category)."""
+    body = await request.json()
+    pattern = str(body.get("pattern") or "").strip()
+    category = str(body.get("category") or "").strip()
+    raw_rule_type = str(body.get("rule_type") or "contains")
+
+    if not pattern:
+        return JSONResponse({"error": "pattern is required"}, status_code=400)
+    if not category:
+        return JSONResponse({"error": "category is required"}, status_code=400)
+
+    try:
+        rule_type = normalize_rule_type(raw_rule_type)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    if rule_type == "regex":
+        import re
+
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+
+    with _get_db() as db:
+        rule = db.add_category_rule(rule_type=rule_type, pattern=pattern, category=category)
+
+    return {"ok": True, "rule": rule}
+
+
+@app.delete("/api/settings/rules/{rule_id}")
+async def api_delete_category_rule(rule_id: int):
+    """Delete a categorization rule by ID."""
+    with _get_db() as db:
+        deleted = db.delete_category_rule(rule_id)
+    if not deleted:
+        return JSONResponse({"error": "Rule not found"}, status_code=404)
+    return {"ok": True, "id": rule_id}
 
 
 @app.post("/api/settings/reset-db")
@@ -492,6 +631,7 @@ async def api_upload(file: UploadFile = File(...)):
             with _get_db() as db:
                 new_txns = [t for t in parsed if not db.is_seen(t.id)]
                 overrides = db.get_overrides()
+                category_rules = db.get_category_rules()
                 merchant_db = db.get_merchant_categories()
                 training_data = db.get_training_data()
 
@@ -508,6 +648,8 @@ async def api_upload(file: UploadFile = File(...)):
             # Pre-categorise from overrides (instant)
             pre_cat = []
             to_process = []
+            override_count = 0
+            rule_count = 0
             for t in new_txns:
                 od = t.raw_description
                 if od in overrides:
@@ -517,8 +659,35 @@ async def api_upload(file: UploadFile = File(...)):
                         category=overrides[od]["category"],
                         amount=t.amount, currency=t.currency, date=t.date,
                     ))
+                    override_count += 1
+                    continue
+
+                from spectra.rules import first_matching_rule
+
+                matched_rule = first_matching_rule(
+                    category_rules,
+                    clean_name=od,
+                    raw_description=od,
+                )
+                if matched_rule:
+                    pre_cat.append(CategorisedTransaction(
+                        id=t.id,
+                        original_description=od,
+                        clean_name=od,
+                        category=str(matched_rule["category"]),
+                        amount=t.amount,
+                        currency=t.currency,
+                        date=t.date,
+                    ))
+                    rule_count += 1
                 else:
                     to_process.append(t)
+
+            if override_count or rule_count:
+                yield evt(
+                    28,
+                    f"Applied local mappings: {override_count} overrides, {rule_count} rules",
+                )
 
             categorised = list(pre_cat)
 
@@ -661,12 +830,12 @@ async def api_confirm(request: Request):
 
 @app.get("/budget", response_class=HTMLResponse)
 async def page_budget(request: Request):
-    return templates.TemplateResponse("budget.html", {"request": request})
+    return templates.TemplateResponse("budget.html", _template_context(request))
 
 
 @app.get("/trends", response_class=HTMLResponse)
 async def page_trends(request: Request):
-    return templates.TemplateResponse("trends.html", {"request": request})
+    return templates.TemplateResponse("trends.html", _template_context(request))
 
 
 # ── API: Budget ──────────────────────────────────────────────────
@@ -836,6 +1005,115 @@ async def api_trends():
         "period_series": monthly_series,
         "pay_day": pay_day,
         "cycle_start_day": pay_day,
+    }
+
+
+@app.get("/api/subscriptions")
+async def api_subscriptions():
+    """Return recurring subscriptions with monthly and annual projections."""
+    from collections import defaultdict
+    from datetime import date, timedelta
+    from statistics import median
+
+    preferences = _load_app_preferences()
+    pay_day = preferences["pay_day"]
+    cycle_start, cycle_end = cycle_window_for(date.today(), pay_day)
+
+    with _get_db() as db:
+        rows = db._conn.execute(
+            """
+            SELECT date, clean_name, amount, category, COALESCE(original_description, '')
+            FROM tx_history
+            ORDER BY date ASC
+            """
+        ).fetchall()
+
+    buckets: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "name": "",
+            "dates": [],
+            "amounts": [],
+            "in_cycle": 0.0,
+            "last_date": "",
+            "category": "Digital Subscriptions",
+        }
+    )
+
+    for date_str, clean_name, amount, category, original_description in rows:
+        if amount >= 0:
+            continue
+
+        recurring_kind = detect_recurring_kind(clean_name, original_description, amount)
+        if recurring_kind != "Subscription" and category != "Digital Subscriptions":
+            continue
+
+        tx_date = parse_iso_date(date_str)
+        bucket = buckets[clean_name]
+        bucket["name"] = clean_name
+        bucket["category"] = category or "Digital Subscriptions"
+        bucket["dates"].append(tx_date)
+        bucket["amounts"].append(abs(float(amount)))
+        if cycle_start <= tx_date < cycle_end:
+            bucket["in_cycle"] += abs(float(amount))
+        if date_str > bucket["last_date"]:
+            bucket["last_date"] = date_str
+
+    items: list[dict[str, Any]] = []
+    monthly_total = 0.0
+
+    for merchant, bucket in buckets.items():
+        dates = sorted(set(bucket["dates"]))
+        amounts = bucket["amounts"]
+        if not amounts:
+            continue
+
+        avg_amount = sum(amounts) / len(amounts)
+        intervals = [
+            (dates[i] - dates[i - 1]).days
+            for i in range(1, len(dates))
+            if (dates[i] - dates[i - 1]).days > 0
+        ]
+        cadence_days = int(round(median(intervals))) if intervals else 30
+        cadence_days = max(cadence_days, 1)
+
+        monthly_estimate = avg_amount * (30.4375 / cadence_days)
+        annual_projection = monthly_estimate * 12
+        monthly_total += monthly_estimate
+
+        last_date = parse_iso_date(bucket["last_date"]) if bucket["last_date"] else dates[-1]
+        next_charge = last_date + timedelta(days=cadence_days)
+
+        items.append(
+            {
+                "merchant": merchant,
+                "category": bucket["category"],
+                "last_amount": round(amounts[-1], 2),
+                "average_amount": round(avg_amount, 2),
+                "cadence_days": cadence_days,
+                "last_charge_date": last_date.isoformat(),
+                "next_estimated_date": next_charge.isoformat(),
+                "monthly_estimate": round(monthly_estimate, 2),
+                "annual_projection": round(annual_projection, 2),
+                "in_current_cycle": round(bucket["in_cycle"], 2),
+                "payments_count": len(amounts),
+            }
+        )
+
+    items.sort(key=lambda row: row["monthly_estimate"], reverse=True)
+
+    return {
+        "items": items,
+        "summary": {
+            "active_count": len(items),
+            "monthly_estimate": round(monthly_total, 2),
+            "annual_projection": round(monthly_total * 12, 2),
+            "in_current_cycle": round(sum(item["in_current_cycle"] for item in items), 2),
+        },
+        "current_cycle": {
+            "start": cycle_start.isoformat(),
+            "end": cycle_end.isoformat(),
+            "label": format_cycle_label(cycle_start, cycle_end),
+        },
     }
 
 

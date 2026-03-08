@@ -306,6 +306,37 @@ body {
     min-width: 170px;
 }
 
+.burn-rate {
+    margin: -8px 0 26px;
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    background: var(--bg-elevated);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+}
+
+.burn-rate-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.burn-rate-main {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    margin-top: 6px;
+}
+
+.burn-rate-meta {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
 /* ─── Cards Grid ───────────────────────────────────────────────── */
 
 .cards {
@@ -434,6 +465,43 @@ body {
     color: var(--text-faint);
 }
 
+.uncategorized-queue {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+    flex-wrap: wrap;
+}
+
+.uncat-queue-info {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.uncat-queue-actions {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.quick-category-wrap {
+    margin-top: 6px;
+}
+
+.quick-category-select {
+    min-width: 170px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--input-bg);
+    color: var(--text);
+    font-size: 12px;
+}
+
 table {
     width: 100%;
     border-collapse: collapse;
@@ -454,6 +522,19 @@ th {
     letter-spacing: 0.05em;
     border-bottom: 1px solid var(--border);
     user-select: none;
+}
+
+th.sortable {
+    cursor: pointer;
+}
+
+th.sortable:hover {
+    color: var(--text);
+}
+
+.sort-indicator {
+    opacity: 0.65;
+    margin-left: 4px;
 }
 
 td {
@@ -483,6 +564,42 @@ td.amount.expense {
 
 td.amount.income {
     color: var(--positive);
+}
+
+.cadence-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.cadence-days {
+    margin-left: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.cadence-weekly {
+    background: var(--badge-cloud-bg);
+    color: var(--badge-cloud-text);
+}
+
+.cadence-monthly {
+    background: var(--badge-local-bg);
+    color: var(--badge-local-text);
+}
+
+.cadence-yearly {
+    background: var(--badge-theme-light-bg);
+    color: var(--badge-theme-light-text);
+}
+
+.cadence-custom {
+    background: var(--bg-subtle);
+    color: var(--text-muted);
 }
 
 /* ─── Category Badges ──────────────────────────────────────────── */
@@ -762,6 +879,38 @@ td.amount.income {
 .settings-select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.settings-input {
+    min-width: 180px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: var(--font);
+    color: var(--text);
+    background: var(--input-bg);
+    outline: none;
+}
+
+.settings-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.rules-builder {
+    width: min(100%, 760px);
+    justify-content: flex-end;
+}
+
+.rules-list code {
+    font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 12px;
+    color: var(--text);
 }
 
 /* ─── Day Stepper ──────────────────────────────────────────────── */
@@ -1478,6 +1627,22 @@ td.amount.income {
     .table-toolbar select {
         font-size: 12px;
         padding: 5px 8px;
+    }
+
+    .quick-category-select,
+    .settings-input,
+    .settings-select {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .uncategorized-queue,
+    .uncat-queue-actions {
+        width: 100%;
+    }
+
+    .rules-builder {
+        width: 100%;
     }
 }
 

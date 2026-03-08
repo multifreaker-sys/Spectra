@@ -32,6 +32,12 @@
     </div>
 </div>
 
+<div class="burn-rate" id="burnRateBox" style="display:none;">
+    <div class="burn-rate-label">Cycle Forecast</div>
+    <div class="burn-rate-main" id="burnRateMain">—</div>
+    <div class="burn-rate-meta" id="burnRateMeta">—</div>
+</div>
+
 <div class="charts-row">
     <div class="chart-box">
         <h3>Spending by Category</h3>
@@ -224,6 +230,25 @@
         });
     }
 
+    function renderBurnRate(data) {
+        const box = document.getElementById('burnRateBox');
+        const main = document.getElementById('burnRateMain');
+        const meta = document.getElementById('burnRateMeta');
+        if (!box || !main || !meta) {
+            return;
+        }
+
+        if (data.scope !== 'cycle' || !data.burn_rate || !data.has_data) {
+            box.style.display = 'none';
+            return;
+        }
+
+        const burn = data.burn_rate;
+        box.style.display = 'block';
+        main.textContent = `${formatCurrency(burn.projected_total)} projected by cycle end`;
+        meta.textContent = `${formatCurrency(burn.daily_spend)}/day · ${burn.elapsed_days}/${burn.total_days} days elapsed · ${burn.remaining_days} days left`;
+    }
+
     async function loadDashboard(scope = getScope()) {
         try {
             const normalizedScope = normalizeScope(scope);
@@ -240,6 +265,7 @@
             document.getElementById('uncategorized').textContent = data.uncategorized;
 
             document.getElementById('subtitle').textContent = data.scope_label || data.current_cycle?.label || 'Selected period';
+            renderBurnRate(data);
 
             if (!data.has_data) {
                 document.getElementById('subtitle').textContent = 'No data yet';

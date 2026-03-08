@@ -149,3 +149,8 @@ def apply_recurring_tags(
             
             # Record it for the future items in this batch
             history.setdefault(t.clean_name, []).append((t.date, t.amount))
+
+
+def detect_recurring_kind(clean_name: str, original_description: str, amount: float) -> str:
+    """Public helper used by the web API to classify recurring transactions."""
+    return _detect_static_pattern(clean_name, original_description, amount)

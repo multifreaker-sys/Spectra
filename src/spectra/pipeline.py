@@ -12,6 +12,7 @@ from spectra.config import Settings, load_settings
 from spectra.csv_parser import ParsedTransaction, parse_csv
 from spectra.dashboard import refresh_dashboard
 from spectra.db import BookmarkDB
+from spectra.rules import first_matching_rule
 from spectra.sheets import SheetsClient
 
 logger = logging.getLogger("spectra")
@@ -74,10 +75,13 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
             db.save_overrides(overrides)
 
         logger.info("📂 Existing categories: %s", existing_categories or "(none)")
+        category_rules = db.get_category_rules()
 
         # ── Step 3b: Local Override Matching (skip LLM if mapped) ────
         to_llm = []
         pre_categorised: list[CategorisedTransaction] = []
+        override_count = 0
+        rule_count = 0
         
         for t in new_txns:
             # ParsedTransaction (from csv/pdf) uses raw_description
@@ -95,11 +99,37 @@ def run(settings: Settings, file: str, currency: str, dry_run: bool) -> None:
                         date=t.date,
                     )
                 )
+                override_count += 1
+                continue
+
+            matched_rule = first_matching_rule(
+                category_rules,
+                clean_name=od,
+                raw_description=od,
+            )
+            if matched_rule:
+                pre_categorised.append(
+                    CategorisedTransaction(
+                        id=t.id,
+                        original_description=od,
+                        clean_name=od,
+                        category=str(matched_rule["category"]),
+                        amount=t.amount,
+                        currency=t.currency,
+                        date=t.date,
+                    )
+                )
+                rule_count += 1
             else:
                 to_llm.append(t)
                 
-        if pre_categorised:
-            logger.info("Applied overrides to %d transaction(s) locally", len(pre_categorised))
+        if override_count or rule_count:
+            logger.info(
+                "Applied local mapping to %d transaction(s): %d overrides, %d rules",
+                override_count + rule_count,
+                override_count,
+                rule_count,
+            )
 
         # ── Step 4: Categorisation (LLM or Local) ────────────────
         categorised = []

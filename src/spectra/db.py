@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS category_rules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_type   TEXT NOT NULL,     -- contains | regex
+    pattern     TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    priority    INTEGER NOT NULL DEFAULT 100,
+    is_active   INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -83,6 +93,17 @@ class BookmarkDB:
             CREATE TABLE IF NOT EXISTS app_settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS category_rules (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule_type  TEXT NOT NULL,
+                pattern    TEXT NOT NULL,
+                category   TEXT NOT NULL,
+                priority   INTEGER NOT NULL DEFAULT 100,
+                is_active  INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
         self._conn.commit()
@@ -215,6 +236,59 @@ class BookmarkDB:
             (key, value),
         )
         self._conn.commit()
+
+    # ── Category Rules ─────────────────────────────────────────
+
+    def get_category_rules(self) -> list[dict[str, object]]:
+        """Return all category rules sorted by priority then id."""
+        rows = self._conn.execute(
+            """
+            SELECT id, rule_type, pattern, category, priority, is_active
+            FROM category_rules
+            ORDER BY priority ASC, id ASC
+            """
+        ).fetchall()
+        return [
+            {
+                "id": int(rule_id),
+                "rule_type": str(rule_type),
+                "pattern": str(pattern),
+                "category": str(category),
+                "priority": int(priority),
+                "is_active": bool(is_active),
+            }
+            for rule_id, rule_type, pattern, category, priority, is_active in rows
+        ]
+
+    def add_category_rule(self, rule_type: str, pattern: str, category: str) -> dict[str, object]:
+        """Insert a new category rule and return it."""
+        next_priority_row = self._conn.execute(
+            "SELECT COALESCE(MAX(priority), 0) + 1 FROM category_rules"
+        ).fetchone()
+        priority = int(next_priority_row[0] if next_priority_row else 1)
+
+        cur = self._conn.execute(
+            """
+            INSERT INTO category_rules (rule_type, pattern, category, priority, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            (rule_type, pattern, category, priority),
+        )
+        self._conn.commit()
+        return {
+            "id": int(cur.lastrowid),
+            "rule_type": rule_type,
+            "pattern": pattern,
+            "category": category,
+            "priority": priority,
+            "is_active": True,
+        }
+
+    def delete_category_rule(self, rule_id: int) -> bool:
+        """Delete a category rule by id. Returns True if deleted."""
+        cur = self._conn.execute("DELETE FROM category_rules WHERE id = ?", (int(rule_id),))
+        self._conn.commit()
+        return cur.rowcount > 0
 
     def get_training_data(self) -> list[tuple[str, str]]:
         """Return (description, category) pairs for ML training.

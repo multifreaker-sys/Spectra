@@ -28,7 +28,7 @@
     <div class="settings-row">
         <div class="settings-label">
             Financial month starts on
-            <small>Choose your payday (1-31). Each cycle covers that day plus the next 30 days.</small>
+            <small>Pick the day of the month your cycle begins (1-28). Each cycle runs until the day before the next month's start.</small>
         </div>
         <div class="settings-control-group">
             <div class="day-stepper">
@@ -55,6 +55,31 @@
             <span class="cycle-range-date" id="cycleRangeStart">—</span>
             <svg class="cycle-range-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             <span class="cycle-range-date" id="cycleRangeEnd">—</span>
+        </div>
+    </div>
+</div>
+
+<div class="settings-group">
+    <h3>Categorization Rules</h3>
+    <div class="settings-row">
+        <div class="settings-label">
+            Rules Engine
+            <small>Apply deterministic rules before AI/local categorization (contains or regex)</small>
+        </div>
+        <div class="settings-control-group rules-builder">
+            <select id="ruleType" class="settings-select">
+                <option value="contains">Contains</option>
+                <option value="regex">Regex</option>
+            </select>
+            <input type="text" id="rulePattern" class="settings-input" placeholder="e.g. amazon|amzn|prime" />
+            <input type="text" id="ruleCategory" class="settings-input" placeholder="Category (e.g. Shopping)" list="categoryHints" />
+            <datalist id="categoryHints"></datalist>
+            <button class="btn btn-primary btn-sm" type="button" onclick="createRule()">Add rule</button>
+        </div>
+    </div>
+    <div id="rulesList" class="rules-list">
+        <div class="empty-state" style="padding: 18px; margin-top: 8px;">
+            <p>Loading rules...</p>
         </div>
     </div>
 </div>
@@ -138,6 +163,8 @@
 
 {% block scripts %}
 <script>
+    let settingsCategories = [];
+
     function ordSuffix(d) {
         if (d >= 11 && d <= 13) return 'th';
         switch (d % 10) {
@@ -152,8 +179,10 @@
         return parseInt(document.getElementById('cycleStartDay').value, 10) || 1;
     }
 
+    const MAX_CYCLE_DAY = 28;
+
     function setCycleDayValue(day) {
-        const clamped = Math.max(1, Math.min(31, day));
+        const clamped = Math.max(1, Math.min(MAX_CYCLE_DAY, day));
         document.getElementById('cycleStartDay').value = String(clamped);
         document.getElementById('cycleStartDayNum').textContent = String(clamped);
         document.getElementById('cycleStartDayOrd').textContent = ordSuffix(clamped);
@@ -161,8 +190,8 @@
 
     function adjustCycleDayStep(delta) {
         const current = getCycleDayValue();
-        // Wrap: dec from 1 -> 31, inc from 31 -> 1
-        const next = ((current - 1 + delta + 31) % 31) + 1;
+        // Wrap: dec from 1 -> 28, inc from 28 -> 1
+        const next = ((current - 1 + delta + MAX_CYCLE_DAY) % MAX_CYCLE_DAY) + 1;
         setCycleDayValue(next);
     }
 
@@ -269,6 +298,112 @@
             button.disabled = false;
             button.textContent = previousLabel;
         }
+    }
+
+    function renderRules(rules) {
+        const container = document.getElementById('rulesList');
+        if (!rules || rules.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding: 18px; margin-top: 8px;">
+                    <p>No rules yet. Add one to auto-categorize recurring merchants.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const rows = rules.map(rule => `
+            <tr>
+                <td><code>${rule.rule_type}</code></td>
+                <td><code>${rule.pattern}</code></td>
+                <td>${rule.category}</td>
+                <td style="text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="deleteRule(${rule.id})">Delete</button>
+                </td>
+            </tr>
+        `).join('');
+
+        container.innerHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Pattern</th>
+                        <th>Category</th>
+                        <th style="text-align:right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    async function loadRules() {
+        const res = await fetch('/api/settings/rules');
+        const data = await res.json();
+        renderRules(data.rules || []);
+    }
+
+    async function createRule() {
+        const ruleType = document.getElementById('ruleType').value;
+        const pattern = document.getElementById('rulePattern').value.trim();
+        const category = document.getElementById('ruleCategory').value.trim();
+
+        if (!pattern || !category) {
+            showToast('Pattern and category are required', 'error');
+            return;
+        }
+
+        const res = await fetch('/api/settings/rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rule_type: ruleType, pattern, category }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            showToast(data.error || 'Rule creation failed', 'error');
+            return;
+        }
+
+        if (category && !settingsCategories.includes(category)) {
+            settingsCategories.push(category);
+            syncCategoryHints();
+        }
+
+        document.getElementById('rulePattern').value = '';
+        document.getElementById('ruleCategory').value = '';
+        showToast('Rule added');
+        await loadRules();
+    }
+
+    async function deleteRule(ruleId) {
+        const res = await fetch(`/api/settings/rules/${ruleId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            showToast(data.error || 'Delete failed', 'error');
+            return;
+        }
+
+        showToast('Rule deleted', 'info');
+        await loadRules();
+    }
+
+    function syncCategoryHints() {
+        const datalist = document.getElementById('categoryHints');
+        if (!datalist) {
+            return;
+        }
+        datalist.innerHTML = settingsCategories
+            .slice()
+            .sort((a, b) => a.localeCompare(b))
+            .map(cat => `<option value="${cat}"></option>`)
+            .join('');
+    }
+
+    async function loadCategoryHints() {
+        const res = await fetch('/api/categories');
+        const data = await res.json();
+        settingsCategories = Array.isArray(data.categories) ? data.categories : [];
+        syncCategoryHints();
     }
 
     async function loadSettings() {
@@ -381,6 +516,8 @@
 
     setCycleDayValue(1);
     initThemePreference();
+    loadCategoryHints();
+    loadRules();
     loadSettings();
 </script>
 {% endblock %}
