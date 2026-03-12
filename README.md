@@ -16,18 +16,15 @@
   <img src="https://img.shields.io/github/stars/francescogabrieli/Spectra?style=social" alt="GitHub stars" />
 </p>
 
-<p align="center">
-  <img src="assets/Screenshot%202026-03-04%20alle%2016.22.41.png" alt="Spectra Dashboard Overview" width="1000" />
-</p>
+## Screenshots
 
-<p align="center">
-  <img src="assets/Screenshot%202026-03-04%20alle%2016.23.24.png" alt="Spectra Transactions Page" width="495" />
-  <img src="assets/Screenshot%202026-03-04%20alle%2016.23.42.png" alt="Spectra Budget Page" width="495" />
-</p>
+| Dashboard | Transactions |
+|---|---|
+| ![Spectra Dashboard Overview](assets/Screenshot%202026-03-04%20alle%2016.22.41.png) | ![Spectra Transactions Page](assets/Screenshot%202026-03-04%20alle%2016.23.24.png) |
 
-<p align="center">
-  <img src="assets/Screenshot%202026-03-04%20alle%2016.24.01.png" alt="Spectra Trends Page" width="1000" />
-</p>
+| Budget | Trends |
+|---|---|
+| ![Spectra Budget Page](assets/Screenshot%202026-03-04%20alle%2016.23.42.png) | ![Spectra Trends Page](assets/Screenshot%202026-03-04%20alle%2016.24.01.png) |
 
 ---
 
@@ -57,12 +54,13 @@ A full-featured local dashboard at `http://localhost:8080`:
 
 | Page | What it does |
 |---|---|
-| **Dashboard** | Income vs Expenses breakdown, monthly charts, category distribution |
+| **Dashboard** | Cycle-aware overview with income vs expenses, burn-rate insights, monthly charts, and category distribution |
 | **Transactions** | Searchable/sortable ledger with inline category editing |
-| **Upload** | Drag-and-drop CSV/PDF import with editable preview, batch review, and future-learning toggle |
-| **Budget** | Per-category monthly limits with live 🟢/🟡/🔴 status |
-| **Trends** | Month-over-month and year-over-year spending analysis |
-| **Settings** | Rules engine, learning center, active configuration, and local reset tools |
+| **Upload** | Drag-and-drop CSV/PDF import with editable review, inline merchant/category editing, bulk actions, and future-learning toggle |
+| **Budget** | Per-category limits tracked against your active financial cycle with live 🟢/🟡/🔴 status |
+| **Trends** | Month-over-month, year-over-year, and cycle-over-cycle spending analysis |
+| **Subscriptions** | Recurring payments monitor with next charge date, monthly impact, and price-change visibility |
+| **Settings** | Theme preference, financial cycle controls, rules engine, learning center, active configuration, and local reset tools |
 
 ### Three categorization modes
 
@@ -90,9 +88,9 @@ If enabled, Spectra can also push data to a Google Sheet:
 - **Universal import** — Auto-detects delimiters, bank layouts, EU number formats (`1.234,56`), multi-line descriptions
 - **Multi-currency FX** — Historical ECB rates via [Frankfurter API](https://www.frankfurter.app/) (no API key)
 - **Recurring detection** — Pattern matching + historical spacing to flag subscriptions/salary
-- **Human-in-the-loop review** — Edit merchants/categories before import, propagate fixes across similar rows, and decide whether Spectra should learn them for future uploads
+- **Human-in-the-loop review** — Edit merchants/categories before import, run bulk fixes on selected rows, and decide whether Spectra should learn them for future uploads
 - **Rules + learning loop** — Deterministic contains/regex rules, recent feedback history, and retroactive re-application on historical transactions
-- **Actionable insights** — Burn-rate risk, subscription price changes, anomalies, and cycle-over-cycle change detection surfaced in the dashboard
+- **Actionable insights** — Burn-rate risk, subscription tracking, price changes, anomalies, and cycle-over-cycle change detection surfaced in the dashboard
 - **Idempotent** — Transaction hashes in SQLite prevent duplicate imports
 - **Automation-ready** — Can run on a schedule (cron / GitHub Actions)
 
@@ -105,6 +103,7 @@ If enabled, Spectra can also push data to a Google Sheet:
 ```bash
 git clone https://github.com/francescogabrieli/Spectra.git
 cd Spectra
+# Python 3.11+ recommended (3.11, 3.12, 3.13 supported)
 python3 -m venv .venv
 source .venv/bin/activate      # Mac/Linux
 # .venv\Scripts\activate       # Windows
