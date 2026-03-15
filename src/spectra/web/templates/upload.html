@@ -3,7 +3,7 @@
 
 {% block content %}
 <h1 class="page-title">Upload</h1>
-<p class="page-subtitle">Drag and drop a CSV or PDF bank export, then review merchants and categories before saving</p>
+<p class="page-subtitle">Drag and drop a CSV, PDF, or OFX bank export, then review merchants and categories before saving</p>
 
 <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -13,8 +13,8 @@
         <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
     </svg>
     <h3>Drop your bank export here</h3>
-    <p>Supports CSV and PDF files</p>
-    <input type="file" id="fileInput" accept=".csv,.pdf">
+    <p>Supported files: CSV, PDF, and OFX</p>
+    <input type="file" id="fileInput" accept=".csv,.pdf,.ofx">
 </div>
 
 <!-- Real progress UI (hidden until upload starts) -->
