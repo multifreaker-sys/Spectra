@@ -35,6 +35,13 @@ def parse_pdf(
             "pdfplumber is required for PDF support. Install it with:\n"
             "  pip install pdfplumber"
         )
+    try:
+        from pypdf import PdfReader  # type: ignore[import-untyped]
+    except ImportError:
+        raise ImportError(
+            "pypdf is required for PDF text extraction fallback. Install it with:\n"
+            "  pip install pypdf"
+        )
 
     path = Path(file_path)
     if not path.exists():
@@ -54,7 +61,7 @@ def parse_pdf(
 
         # ── Strategy 2: Text-based regex extraction ───────────────
         logger.info("No tables found, falling back to text extraction")
-        transactions = _extract_from_text(pdf, currency)
+        transactions = _extract_from_text_with_pypdf(path, PdfReader, currency)
         logger.info(
             "Text extraction: %d transactions from %s",
             len(transactions), path.name,
@@ -162,11 +169,16 @@ _TX_PATTERN = re.compile(
 )
 
 
-def _extract_from_text(pdf: Any, currency: str) -> list[ParsedTransaction]:
+def _extract_from_text_with_pypdf(
+    file_path: Path,
+    pdf_reader_cls: Any,
+    currency: str,
+) -> list[ParsedTransaction]:
     """Regex-based fallback: scan each line for date + description + amount."""
     transactions: list[ParsedTransaction] = []
+    reader = pdf_reader_cls(str(file_path))
 
-    for page in pdf.pages:
+    for page in reader.pages:
         text = page.extract_text() or ""
         for line in text.splitlines():
             line = line.strip()
