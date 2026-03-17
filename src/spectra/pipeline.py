@@ -24,6 +24,9 @@ def _parse_file(file_path: str, currency: str) -> list[ParsedTransaction]:
     if ext == ".pdf":
         from spectra.pdf_parser import parse_pdf
         return parse_pdf(file_path, currency=currency)
+    elif ext == ".ofx":
+        from spectra.ofx_parser import parse_ofx
+        return parse_ofx(file_path)
     else:
         return parse_csv(file_path, currency=currency)
 
@@ -232,10 +235,10 @@ def run_inbox(settings: Settings, inbox_dir: str, currency: str, dry_run: bool) 
         return
 
     files = sorted(
-        list(inbox.glob("*.csv")) + list(inbox.glob("*.pdf"))
+        list(inbox.glob("*.csv")) + list(inbox.glob("*.pdf")) + list(inbox.glob("*.ofx"))
     )
     if not files:
-        logger.info("📂 No CSV/PDF files in %s — nothing to do", inbox)
+        logger.info("📂 No supported files in %s — nothing to do", inbox)
         return
 
     # Create processed/ as sibling of inbox/

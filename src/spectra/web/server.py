@@ -1026,16 +1026,17 @@ async def api_reset_db(request: Request):
 
 @app.post("/api/upload")
 async def api_upload(file: UploadFile = File(...)):
-    """Upload a CSV/PDF, parse & categorise, stream progress via SSE."""
+    """Upload a supported file, parse & categorise, stream progress via SSE."""
+    supported_file_types = [".csv", ".pdf", ".ofx"]
     import json as _json
     from fastapi.responses import StreamingResponse as _SR
 
     settings = load_settings()
 
     suffix = Path(file.filename or "upload.csv").suffix.lower()
-    if suffix not in (".csv", ".pdf"):
+    if suffix not in supported_file_types:
         return JSONResponse(
-            {"error": f"Unsupported file type: {suffix}. Upload a .csv or .pdf"},
+            {"error": f"Unsupported file type: {suffix}. Upload a {" or ".join(supported_file_types)}"},
             status_code=400,
         )
 
@@ -1062,9 +1063,12 @@ async def api_upload(file: UploadFile = File(...)):
                 if suffix == ".pdf":
                     from spectra.pdf_parser import parse_pdf
                     parsed = parse_pdf(tmp_path, currency=settings.base_currency)
-                else:
+                elif suffix == ".csv":
                     from spectra.csv_parser import parse_csv
                     parsed = parse_csv(tmp_path, currency=settings.base_currency)
+                else:
+                    from spectra.ofx_parser import parse_ofx
+                    parsed = parse_ofx(tmp_path, currency=settings.base_currency)
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
 
