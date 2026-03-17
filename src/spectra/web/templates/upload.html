@@ -116,7 +116,7 @@
 
         return merged
             .filter((value, index, self) => value && self.indexOf(value) === index)
-            .map(category => `<option value="${escapeHtml(category)}" ${category === selected ? 'selected' : ''}>${escapeHtml(category)}</option>`)
+            .map(category => `<option value="${escapeHtml(category)}" ${category === selected ? 'selected' : ''}>${escapeHtml(window.SpectraCategory?.translate(category) || category)}</option>`)
             .join('');
     }
 

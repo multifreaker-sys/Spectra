@@ -64,7 +64,7 @@
             return `
             <div class="budget-card" style="animation-delay: ${i * 0.05}s">
                 <div class="budget-card-header">
-                    <span class="budget-category">${item.category}</span>
+                    <span class="budget-category">${window.SpectraCategory?.translate(item.category) || item.category}</span>
                     <span class="budget-status-icon">${icon}</span>
                 </div>
                 <div class="budget-amounts">
@@ -116,7 +116,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ limit: val }),
                 });
-                showToast(`Budget for ${category} set to ${formatCurrency(val)}`);
+                const categoryLabel = window.SpectraCategory?.translate(category) || category;
+                showToast(`Budget voor ${categoryLabel} ingesteld op ${formatCurrency(val)}`);
             }
             loadBudget();
         }

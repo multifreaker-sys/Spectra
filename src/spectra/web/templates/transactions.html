@@ -9,7 +9,7 @@
     <div class="table-toolbar">
         <input type="text" id="searchInput" placeholder="Search merchants..." style="flex:1; max-width: 260px;">
         <select id="categoryFilter">
-            <option value="">All categories</option>
+            <option value="">Alle categorieen</option>
         </select>
         <input type="date" id="dateFrom" title="From date">
         <input type="date" id="dateTo" title="To date">
@@ -17,7 +17,7 @@
     </div>
 
     <div class="uncategorized-queue" id="uncatQueue" style="display:none;">
-        <div class="uncat-queue-info" id="uncatQueueInfo">Uncategorized queue</div>
+        <div class="uncat-queue-info" id="uncatQueueInfo">Ongecategoriseerde wachtrij</div>
         <div class="uncat-queue-actions">
             <button class="btn btn-secondary btn-sm" type="button" id="selectAllVisibleBtn" onclick="toggleSelectAllVisible()">Select all visible</button>
             <select id="bulkCategorySelect" class="settings-select">
@@ -51,7 +51,8 @@
     function categoryOptionsHtml(selected = '') {
         return categories.map(cat => {
             const isSelected = cat === selected ? 'selected' : '';
-            return `<option value="${cat}" ${isSelected}>${cat}</option>`;
+            const label = window.SpectraCategory?.translate(cat) || cat;
+            return `<option value="${cat}" ${isSelected}>${label}</option>`;
         }).join('');
     }
 
@@ -64,12 +65,12 @@
         categories.forEach(c => {
             const opt = document.createElement('option');
             opt.value = c;
-            opt.textContent = c;
+            opt.textContent = window.SpectraCategory?.translate(c) || c;
             select.appendChild(opt);
         });
 
         const bulkSelect = document.getElementById('bulkCategorySelect');
-        bulkSelect.innerHTML = '<option value="">Choose category…</option>' + categoryOptionsHtml();
+        bulkSelect.innerHTML = '<option value="">Kies categorie…</option>' + categoryOptionsHtml();
     }
 
     async function loadTransactions(page = 1) {
@@ -94,14 +95,14 @@
 
         const subtitle = document.getElementById('txSubtitle');
         subtitle.textContent = uncategorizedOnly
-            ? `Inbox zero mode — ${data.total} uncategorized transaction(s)`
+            ? `Inbox zero modus — ${data.total} ongecategoriseerde transactie(s)`
             : 'Click a category or merchant to edit it';
 
         const queue = document.getElementById('uncatQueue');
         const queueInfo = document.getElementById('uncatQueueInfo');
         queue.style.display = uncategorizedOnly ? 'flex' : 'none';
         if (uncategorizedOnly) {
-            queueInfo.textContent = `${data.total} uncategorized on this page set`;
+            queueInfo.textContent = `${data.total} ongecategoriseerde in deze selectie`;
         }
     }
 
@@ -139,7 +140,7 @@
             const quickCategorySelect = isUncategorized
                 ? `<div class="quick-category-wrap">
                     <select class="quick-category-select" onchange="applyQuickCategory('${t.id}', this)">
-                        <option value="">Assign…</option>
+                        <option value="">Toewijzen…</option>
                         ${categoryOptionsHtml()}
                     </select>
                 </div>`
@@ -152,9 +153,9 @@
                 <span class="editable" onclick="editField(this, '${t.id}', 'merchant')">${t.merchant}</span>
             </td>
             <td>
-                <span class="${badgeClass}" onclick="editField(this, '${t.id}', 'category')">
+                <span class="${badgeClass}" data-category="${t.category}" onclick="editField(this, '${t.id}', 'category')">
                     <span class="badge-dot" style="${dotColor}"></span>
-                    ${t.category}
+                    ${window.SpectraCategory?.translate(t.category) || t.category}
                 </span>
                 ${quickCategorySelect}
             </td>
@@ -286,16 +287,23 @@
     }
 
     function editField(el, txId, field) {
-        const current = el.textContent.trim();
+        const current = field === 'category'
+            ? (el.dataset.category || el.textContent.trim())
+            : el.textContent.trim();
         const input = document.createElement('input');
         input.className = 'edit-input';
-        input.value = current;
+        input.value = field === 'category'
+            ? (window.SpectraCategory?.translate(current) || current)
+            : current;
         el.replaceWith(input);
         input.focus();
         input.select();
 
         async function save() {
-            const newVal = input.value.trim();
+            const rawVal = input.value.trim();
+            const newVal = field === 'category'
+                ? (window.SpectraCategory?.toCanonical(rawVal) || rawVal)
+                : rawVal;
             if (newVal && newVal !== current) {
                 const body = {};
                 body[field] = newVal;

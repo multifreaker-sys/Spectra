@@ -224,7 +224,7 @@
     function renderCategoryChart(year) {
         const theme = getTrendTheme();
         const cats = trendsData.by_year[year]?.by_category || {};
-        const labels = Object.keys(cats);
+        const labels = Object.keys(cats).map(cat => window.SpectraCategory?.translate(cat) || cat);
         const values = Object.values(cats);
 
         if (categoryChart) categoryChart.destroy();

@@ -235,6 +235,53 @@
             return `${parseSpectraDate(startDate).toLocaleDateString('en', options)} -> ${endDate.toLocaleDateString('en', options)}`;
         }
 
+        const CATEGORY_LABELS_NL = {
+            'Uncategorized': 'Ongecategoriseerd',
+            'Bank Fees': 'Bankkosten',
+            'Cash Deposit': 'Contante storting',
+            'Cash Withdrawal': 'Contante opname',
+            'Debt Repayment': 'Schuldaflossing',
+            'Digital Subscriptions': 'Digitale abonnementen',
+            'Education': 'Onderwijs',
+            'Entertainment': 'Vrije tijd',
+            'Food & Dining': 'Eten en drinken',
+            'Groceries': 'Boodschappen',
+            'Health': 'Gezondheid',
+            'Health & Fitness': 'Gezondheid en fitness',
+            'Housing': 'Wonen',
+            'Insurance': 'Verzekeringen',
+            'Other Income': 'Overig inkomen',
+            'Pension': 'Pensioen',
+            'Reimbursement': 'Terugbetaling',
+            'Salary': 'Salaris',
+            'Shopping': 'Winkelen',
+            'Taxes': 'Belastingen',
+            'Transfer': 'Overboeking',
+            'Transfer In': 'Inkomende overboeking',
+            'Transport': 'Vervoer',
+            'Travel': 'Reizen',
+            'Utilities': 'Nutsvoorzieningen',
+        };
+
+        const CATEGORY_LABELS_NL_REVERSE = Object.fromEntries(
+            Object.entries(CATEGORY_LABELS_NL).map(([canonical, label]) => [label.toLowerCase(), canonical])
+        );
+
+        function translateCategoryName(category) {
+            return CATEGORY_LABELS_NL[category] || category;
+        }
+
+        function toCanonicalCategoryName(category) {
+            const normalized = String(category || '').trim().toLowerCase();
+            return CATEGORY_LABELS_NL_REVERSE[normalized] || category;
+        }
+
+        window.SpectraCategory = {
+            translate: translateCategoryName,
+            toCanonical: toCanonicalCategoryName,
+            labels: CATEGORY_LABELS_NL,
+        };
+
         function showToast(message, type = 'success') {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
