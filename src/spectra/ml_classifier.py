@@ -15,13 +15,15 @@ from typing import Any
 
 import numpy as np
 
+from spectra.merchant_seeds_nl import SEED_MERCHANTS_NL
+
 logger = logging.getLogger("spectra.ml")
 
 # ── Seed knowledge ──────────────────────────────────────────────
 # Each tuple is (description_example, category).  These bootstrap the model
 # so it works from day-0 without any user history.
 
-_SEED_MERCHANTS: list[tuple[list[str], str]] = [
+_SEED_MERCHANTS_BASE: list[tuple[list[str], str]] = [
     # ── Digital Subscriptions ──────────────────────────────────
     (["Netflix", "NETFLIX.COM", "ADDEBITO SDD NETFLIX.COM", "Netflix subscription"], "Digital Subscriptions"),
     (["Spotify", "SPOTIFY AB", "ADDEBITO SDD SPOTIFY AB", "Spotify Premium"], "Digital Subscriptions"),
@@ -196,6 +198,9 @@ _SEED_MERCHANTS: list[tuple[list[str], str]] = [
     (["Revolut top-up", "REVOLUT TOP UP"], "Transfer"),
 ]
 
+# Global + locale-specific merchants
+_SEED_MERCHANTS: list[tuple[list[str], str]] = _SEED_MERCHANTS_BASE + SEED_MERCHANTS_NL
+
 # Banking prefixes used to augment seed data with realistic raw descriptions.
 _BANKING_PREFIXES = [
     # Italian
@@ -240,6 +245,11 @@ def _build_seed_data() -> list[tuple[str, str]]:
 
 # Pre-computed at import time
 _SEED_DATA: list[tuple[str, str]] = _build_seed_data()
+
+
+def default_categories() -> list[str]:
+    """Return the default category catalog derived from seed merchants."""
+    return sorted({category for _examples, category in _SEED_MERCHANTS})
 
 # Weight multiplier for user data relative to seed data
 _USER_WEIGHT = 10.0

@@ -79,6 +79,96 @@ _STRIP_NOISE = re.compile(
     r")"
 )
 
+# ── Deterministic merchant hints (high precision) ───────────────
+#
+# Applied before ML, after exact/fuzzy merchant memory.
+# Keep these focused to avoid broad false positives.
+_KEYWORD_CATEGORY_HINTS: list[tuple[tuple[str, ...], str]] = [
+    # Taxes / government
+    ((
+        "BELASTINGDIENST",
+        "GBTWENTE",
+        "GBLT",
+        "LANDKREIS GRAFSCHAFT BENTHEIM",
+        "SAMTGEMEINDE UELSEN",
+        "GEMEENTE HENGELO",
+        "BNG GEMEENTE ALMELO",
+    ), "Taxes"),
+    # Utilities / telecom
+    ((
+        "VITENS",
+        "DELTA ENERGIE",
+        "E.ON ENERGIE",
+        "COOLBLUE ENERGIE",
+        "KPN B.V",
+        "KPN - MOBIEL",
+        "GRAFSCHAFTER BREITBAND",
+    ), "Utilities"),
+    # Insurance
+    ((
+        "VGZ",
+        "NATIONALE-NEDERLANDEN",
+        "NN SCHADEVERZEKERING",
+        "VOOGD",
+        "MONUTA VERZEKERINGEN",
+        "UNIVE OOST",
+    ), "Insurance"),
+    # Housing / debt / bank
+    (("ING HYPOTHEKEN", "VERENIGING VAN EIGENAARS"), "Housing"),
+    (("DEFAM", "KLARNA BANK"), "Debt Repayment"),
+    (("KOSTEN BETAALPAKKET",), "Bank Fees"),
+    # Transfers / known person-to-person counterparties
+    ((
+        "ORANJE SPAARREKENING",
+        "EEI KAMP",
+        "HERRN E. KAMP",
+        "M.P.S. KOOIJ",
+        "ALBERT ROTTERINK",
+        "AAB INZ TIKKIE",
+        "INTERNATIONAL CARD SERVICES",
+        "ISAI",
+    ), "Transfer"),
+    # Groceries
+    ((
+        "PLUS ",
+        "AH ",
+        "ALBERT HEIJN",
+        "JUMBO ",
+        "WELKOOP",
+    ), "Groceries"),
+    # Transport
+    ((
+        "FREIE TANKST.",
+        "RAIFFEISEN EMS VECHTE",
+        "TINQ",
+        "TANGO ",
+        "YELLOWBRICK",
+    ), "Transport"),
+    # Health
+    (("ETOS", "KRUIDVAT"), "Health"),
+    # Shopping
+    ((
+        "BOL.COM",
+        "BOLCOM",
+        "ABOUT YOU",
+        "CROCS.EU",
+        "OTTO PAYMENTS",
+        "HEMA ",
+        "ACTION ",
+    ), "Shopping"),
+    # Entertainment / leisure
+    (("MONKEY TOWN", "AVONTURENPARK", "MUSKETIERS"), "Entertainment"),
+]
+
+
+def _keyword_category_hint(raw: str, clean_name: str) -> str | None:
+    """Return a deterministic category hint for known merchants, if any."""
+    text = f"{raw} {clean_name}".upper()
+    for keywords, category in _KEYWORD_CATEGORY_HINTS:
+        if any(keyword in text for keyword in keywords):
+            return category
+    return None
+
 
 def _extract_merchant_name(raw: str) -> str:
     """Extract a clean merchant name from a raw banking description."""
@@ -164,8 +254,9 @@ def categorise_local(
     Cascade order:
     1. Exact merchant memory (clean_name lookup)
     2. Fuzzy match against known merchants
-    3. ML classifier (always active — bootstrapped with seed data)
-    4. Fallback → "Uncategorized"
+    3. Deterministic keyword hints (high-confidence merchants)
+    4. ML classifier (always active — bootstrapped with seed data)
+    5. Fallback → "Uncategorized"
 
     Parameters
     ----------
@@ -189,7 +280,7 @@ def categorise_local(
     logger.info("Categorising %d transaction(s) locally", len(transactions))
 
     results: list[CategorisedTransaction] = []
-    stats = {"exact": 0, "fuzzy": 0, "ml": 0, "fallback": 0}
+    stats = {"exact": 0, "fuzzy": 0, "rules": 0, "ml": 0, "fallback": 0}
 
     for t in transactions:
         raw = t["raw_description"]
@@ -216,7 +307,12 @@ def categorise_local(
             clean_name = matched_name  # Use the canonical name
             stats["fuzzy"] += 1
 
-        # Step 4: ML classifier (always active thanks to seed data)
+        # Step 4: Deterministic keyword hints for high-signal merchants
+        elif (hint_category := _keyword_category_hint(raw, clean_name)):
+            category = hint_category
+            stats["rules"] += 1
+
+        # Step 5: ML classifier (always active thanks to seed data)
         elif ml_classifier is not None:
             try:
                 from spectra.ml_classifier import predict
@@ -233,7 +329,7 @@ def categorise_local(
                 category = "Uncategorized"
                 stats["fallback"] += 1
 
-        # Step 5: Fallback
+        # Step 6: Fallback
         else:
             category = "Uncategorized"
             stats["fallback"] += 1
@@ -264,8 +360,8 @@ def categorise_local(
         )
 
     logger.info(
-        "Local categorisation: %d exact, %d fuzzy, %d ML, %d fallback",
-        stats["exact"], stats["fuzzy"], stats["ml"], stats["fallback"],
+        "Local categorisation: %d exact, %d fuzzy, %d rules, %d ML, %d fallback",
+        stats["exact"], stats["fuzzy"], stats["rules"], stats["ml"], stats["fallback"],
     )
 
     return results

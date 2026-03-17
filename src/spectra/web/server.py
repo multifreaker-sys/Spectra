@@ -767,11 +767,16 @@ async def api_bulk_update_category(request: Request):
 @app.get("/api/categories")
 async def api_categories():
     """Return all known categories."""
+    from spectra.ml_classifier import default_categories
+
+    seed_categories = set(default_categories())
     with _get_db() as db:
         cats = db._conn.execute(
             "SELECT DISTINCT category FROM tx_history WHERE category != 'Uncategorized' ORDER BY category"
         ).fetchall()
-    return {"categories": [row[0] for row in cats]}
+    learned_categories = {str(row[0]) for row in cats if str(row[0]).strip()}
+    merged = sorted(seed_categories | learned_categories)
+    return {"categories": merged}
 
 
 # ── API: Settings ────────────────────────────────────────────────

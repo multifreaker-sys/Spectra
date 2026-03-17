@@ -98,6 +98,44 @@ class TestParseCsv:
         assert txns[0].amount == -4.5  # debit
         assert txns[1].amount == 1500.0  # credit
 
+    def test_dutch_ing_format_with_af_bij(self, tmp_path: Path) -> None:
+        """ING NL format: 'Naam / Omschrijving' + 'Af Bij' + 'Bedrag (EUR)'."""
+        csv = tmp_path / "test.csv"
+        csv.write_text(dedent("""\
+            Datum;Naam / Omschrijving;Rekening;Tegenrekening;Code;Af Bij;Bedrag (EUR);Mutatiesoort;Mededelingen;Saldo na mutatie;Tag
+            22-02-2026;JUMBO SUPERMARKT;NL00INGB0000000000;;;Af;4,50;Betaalpas;;1000,00;
+            21-02-2026;SALARY ACME;NL00INGB0000000000;;;Bij;1.500,00;Overboeking;;2500,00;
+        """))
+        txns = parse_csv(csv)
+        assert len(txns) == 2
+        assert txns[0].date == "2026-02-22"
+        assert txns[0].raw_description == "JUMBO SUPERMARKT"
+        assert txns[0].amount == -4.5
+        assert txns[1].amount == 1500.0
+
+    def test_long_merchant_name_not_cleaned_to_empty(self, tmp_path: Path) -> None:
+        """Long alphabetic merchant names (15+ chars) must be preserved."""
+        csv = tmp_path / "test.csv"
+        csv.write_text(dedent("""\
+            Date;Description;Amount
+            2026-02-22;BELASTINGDIENST;-12.00
+        """))
+        txns = parse_csv(csv)
+        assert len(txns) == 1
+        assert txns[0].raw_description == "BELASTINGDIENST"
+
+    def test_duplicate_same_day_amount_gets_disambiguated_id(self, tmp_path: Path) -> None:
+        """Distinct rows with same date/description/amount must not collapse to one ID."""
+        csv = tmp_path / "test.csv"
+        csv.write_text(dedent("""\
+            Date;Description;Amount;Mededelingen
+            2026-02-22;PAYPAL;-2.99;Ref A
+            2026-02-22;PAYPAL;-2.99;Ref B
+        """))
+        txns = parse_csv(csv)
+        assert len(txns) == 2
+        assert txns[0].id != txns[1].id
+
     def test_dedup_ids_are_stable(self, tmp_path: Path) -> None:
         """Same data should produce the same IDs."""
         csv = tmp_path / "test.csv"

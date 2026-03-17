@@ -28,6 +28,8 @@ _DESCRIPTION_ALIASES = {
     "remittance", "transaction description", "narrative",
     "wording", "reference", "note", "notes", "memo",
     "causale pagamento", "descrizione operazione",
+    # Dutch bank exports (e.g. ING NL)
+    "omschrijving", "naam / omschrijving", "naam/omschrijving",
 }
 # Secondary/detail columns — merged into description for AI context
 _DETAIL_ALIASES = {
@@ -39,6 +41,17 @@ _AMOUNT_ALIASES = {
     "importo eur", "amount eur", "saldo", "totale",
     "dare/avere", "accredito/addebito", "entrate/uscite",
     "net amount",
+    # Dutch bank exports (e.g. ING NL)
+    "bedrag", "bedrag (eur)",
+}
+_DIRECTION_ALIASES = {
+    "af bij", "af/bij", "debit/credit", "credit/debit",
+}
+_DIRECTION_DEBIT_VALUES = {
+    "af", "debit", "dr", "out",
+}
+_DIRECTION_CREDIT_VALUES = {
+    "bij", "credit", "cr", "in",
 }
 _CREDIT_ALIASES = {
     "accredito", "credit", "entrate", "income", "in", "avere",
@@ -134,10 +147,17 @@ def _parse_date(raw: str) -> str:
     raise ValueError(f"Cannot parse date: {raw!r}")
 
 
-def _make_id(date: str, description: str, amount: float) -> str:
+def _make_id(
+    date: str,
+    description: str,
+    amount: float,
+    fingerprint: str = "",
+) -> str:
     """Create a stable ID for dedup (hash of key fields)."""
     import hashlib
     key = f"{date}|{description.strip().lower()}|{amount:.2f}"
+    if fingerprint.strip():
+        key += f"|{fingerprint.strip().lower()}"
     return "CSV-" + hashlib.sha1(key.encode()).hexdigest()[:16]
 
 
@@ -149,7 +169,7 @@ def _map_columns(headers: list[str]) -> dict[str, int]:
     """Find the indices of required columns based on known aliases."""
     mapping: dict[str, int] = {}
     for i, h_raw in enumerate(headers):
-        h = h_raw.strip().lower()
+        h = _normalize(h_raw.replace("\xa0", " "))
         if h in _DATE_ALIASES:
             mapping.setdefault("date", i)
         elif h in _DESCRIPTION_ALIASES:
@@ -158,6 +178,8 @@ def _map_columns(headers: list[str]) -> dict[str, int]:
             mapping.setdefault("detail", i)   # secondary detail column
         elif h in _AMOUNT_ALIASES:
             mapping.setdefault("amount", i)
+        elif h in _DIRECTION_ALIASES:
+            mapping.setdefault("direction", i)
         elif h in _CREDIT_ALIASES:
             mapping.setdefault("credit", i)
         elif h in _DEBIT_ALIASES:
@@ -200,8 +222,15 @@ def _clean_description(text: str) -> str:
         # Strip currency exchange boilerplate e.g. (ctv. Di 1081 Usd Al Cambio Di 0863334)
         part = re.sub(r"(?i)\(ctv\.\s+di\s+.*?\)", "", part)
 
-        # Strip long alphanumeric trace IDs (like 02INTER...)
-        part = re.sub(r"\b[A-Za-z0-9]{15,}\b", " ", part)
+        # Strip long tracking tokens (e.g. 02INTER..., YYW1047104932908),
+        # but keep plain long merchant words (e.g. BELASTINGDIENST).
+        def _strip_trace_token(match: re.Match[str]) -> str:
+            token = match.group(0)
+            has_alpha = any(ch.isalpha() for ch in token)
+            has_digit = any(ch.isdigit() for ch in token)
+            return " " if has_alpha and has_digit else token
+
+        part = re.sub(r"\b[A-Za-z0-9]{15,}\b", _strip_trace_token, part)
         
         part = re.sub(r"\s+", " ", part).strip()
         if part:
@@ -292,6 +321,7 @@ def parse_csv(
 
     transactions: list[ParsedTransaction] = []
     skipped = 0
+    seen_ids: set[str] = set()
 
     for row_num, row in enumerate(data_rows, start=header_idx + 2):
         # Skip empty rows
@@ -316,6 +346,9 @@ def parse_csv(
                     raw_desc = f"{raw_desc} | {detail}"
             
             description = _clean_description(raw_desc)
+            if not description:
+                # Safety fallback: never lose merchant information entirely.
+                description = raw_desc.strip()
 
             # Amount: either a single column or split credit/debit
             if "amount" in col:
@@ -323,6 +356,12 @@ def parse_csv(
                 if not raw_amount:
                     continue
                 amount = _parse_amount(raw_amount)
+                if "direction" in col and col["direction"] < len(row):
+                    direction = _normalize(row[col["direction"]]).replace(".", "")
+                    if direction in _DIRECTION_DEBIT_VALUES:
+                        amount = -abs(amount)
+                    elif direction in _DIRECTION_CREDIT_VALUES:
+                        amount = abs(amount)
             else:
                 raw_credit = row[col["credit"]].strip() if "credit" in col else ""
                 raw_debit = row[col["debit"]].strip() if "debit" in col else ""
@@ -332,6 +371,21 @@ def parse_csv(
                 amount = abs(credit) - abs(debit)
 
             tx_id = _make_id(date, description, amount)
+            if tx_id in seen_ids:
+                # Disambiguate truly distinct same-day same-amount duplicates
+                # using the full row payload (stable across re-imports).
+                row_fingerprint = "|".join(cell.strip() for cell in row)
+                tx_id = _make_id(date, description, amount, fingerprint=row_fingerprint)
+                suffix = 2
+                while tx_id in seen_ids:
+                    tx_id = _make_id(
+                        date,
+                        description,
+                        amount,
+                        fingerprint=f"{row_fingerprint}|dup#{suffix}",
+                    )
+                    suffix += 1
+            seen_ids.add(tx_id)
             
             row_currency = currency
             if "currency" in col and col["currency"] < len(row):
