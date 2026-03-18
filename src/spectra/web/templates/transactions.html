@@ -60,6 +60,27 @@
         }).join('');
     }
 
+    function splitBookingDateTime(value) {
+        const raw = String(value || '').trim();
+        const match = raw.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2})(?::\d{2})?)?/);
+        if (match) {
+            return { date: match[1], time: match[2] || '' };
+        }
+        return { date: raw, time: '' };
+    }
+
+    function formatBookingDateCell(tx) {
+        const { date, time } = splitBookingDateTime(tx.date);
+        const dateLabel = date ? formatSpectraDate(date, { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        const timeLabel = String(tx.booking_time || time || '').trim() || '—:—';
+        return `
+            <div class="tx-booking">
+                <span class="tx-booking-date">${dateLabel}</span>
+                <span class="tx-booking-time">${timeLabel}</span>
+            </div>
+        `;
+    }
+
     async function loadCategories() {
         const res = await fetch('/api/categories');
         const data = await res.json();
@@ -159,7 +180,7 @@
 
             html += `<tr>
             <td>${checkbox}</td>
-            <td>${t.date}</td>
+            <td>${formatBookingDateCell(t)}</td>
             <td>
                 <span class="editable" onclick="editField(this, '${t.id}', 'merchant')">${t.merchant}</span>
             </td>

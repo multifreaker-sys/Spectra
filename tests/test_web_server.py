@@ -308,3 +308,22 @@ def test_can_store_language_preference(client: TestClient) -> None:
     payload = response.json()
     assert payload["ok"] is True
     assert payload["language_preference"] == "nl"
+
+
+def test_transactions_include_booking_time_hint(client: TestClient, web_settings: Settings) -> None:
+    with BookmarkDB(web_settings.db_path) as db:
+        seed_tx(
+            db,
+            tx_id="tx-time-hint",
+            tx_date="2026-03-12",
+            merchant="Cafe Test",
+            amount=-8.5,
+            category="Food & Dining",
+            original_description="POS payment 14:37 cafe",
+        )
+
+    response = client.get("/api/transactions")
+    assert response.status_code == 200
+    payload = response.json()
+    row = next(item for item in payload["transactions"] if item["id"] == "tx-time-hint")
+    assert row["booking_time"] == "14:37"

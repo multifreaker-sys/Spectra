@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,10 @@ _LANGUAGE_SETTING_KEY = "language_preference"
 _VALID_THEME_PREFERENCES = {"auto", "light", "dark"}
 _VALID_LANGUAGE_PREFERENCES = {"auto", "en", "nl"}
 _VALID_SUMMARY_SCOPES = {"cycle", "90d", "ytd"}
+_DATE_TIME_WITH_SEPARATOR = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})[T\s](?P<time>\d{2}:\d{2})(?::\d{2})?"
+)
+_TIME_IN_TEXT = re.compile(r"\b(?P<h>[01]?\d|2[0-3])[:.](?P<m>[0-5]\d)\b")
 
 
 # ── Global error handler ─────────────────────────────────────────
@@ -264,6 +269,24 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return default
+
+
+def _extract_booking_time(date_value: str, original_description: str = "") -> str:
+    """Extract HH:MM from date-time strings or description text if available."""
+    raw_date = str(date_value or "").strip()
+    if raw_date:
+        dt_match = _DATE_TIME_WITH_SEPARATOR.match(raw_date)
+        if dt_match:
+            return str(dt_match.group("time"))
+
+    raw_description = str(original_description or "")
+    match = _TIME_IN_TEXT.search(raw_description)
+    if not match:
+        return ""
+
+    hour = int(match.group("h"))
+    minute = int(match.group("m"))
+    return f"{hour:02d}:{minute:02d}"
 
 
 def _persist_learning(
@@ -750,12 +773,16 @@ async def api_transactions(
 ):
     """Return paginated transactions from history."""
     with _get_db() as db:
-        query = "SELECT tx_id, date, clean_name, amount, category FROM tx_history ORDER BY date DESC"
+        query = """
+            SELECT tx_id, date, clean_name, amount, category, original_description
+            FROM tx_history
+            ORDER BY date DESC
+        """
         rows = db._conn.execute(query).fetchall()
 
     # Build result with categories
     results = []
-    for tx_id, date, clean_name, amount, cat in rows:
+    for tx_id, date, clean_name, amount, cat, original_description in rows:
 
         # Filters
         if category and cat.lower() != category.lower():
@@ -772,6 +799,10 @@ async def api_transactions(
         results.append({
             "id": tx_id,
             "date": date,
+            "booking_time": _extract_booking_time(
+                str(date),
+                str(original_description or ""),
+            ),
             "merchant": clean_name,
             "category": cat,
             "amount": amount,
