@@ -44,6 +44,10 @@
     let categories = [];
     let uncategorizedOnly = false;
 
+    function apiErrorMessage(payload, fallback) {
+        return window.SpectraApi?.errorMessage(payload, fallback) || fallback;
+    }
+
     function themeVar(name, fallback = '') {
         return window.SpectraTheme?.getCssVar(name, fallback) || fallback;
     }
@@ -62,6 +66,10 @@
         categories = data.categories;
 
         const select = document.getElementById('categoryFilter');
+        const allCategoriesLabel = (window.SpectraI18n?.getLanguage() || 'en') === 'nl'
+            ? 'Alle categorieen'
+            : 'All categories';
+        select.innerHTML = `<option value="">${allCategoriesLabel}</option>`;
         categories.forEach(c => {
             const opt = document.createElement('option');
             opt.value = c;
@@ -70,7 +78,10 @@
         });
 
         const bulkSelect = document.getElementById('bulkCategorySelect');
-        bulkSelect.innerHTML = '<option value="">Kies categorie…</option>' + categoryOptionsHtml();
+        const chooseLabel = (window.SpectraI18n?.getLanguage() || 'en') === 'nl'
+            ? 'Kies categorie...'
+            : 'Choose category...';
+        bulkSelect.innerHTML = `<option value="">${chooseLabel}</option>` + categoryOptionsHtml();
     }
 
     async function loadTransactions(page = 1) {
@@ -250,7 +261,7 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            showToast(data.error || 'Bulk update failed', 'error');
+            showToast(apiErrorMessage(data, 'Bulk update failed'), 'error');
             return;
         }
 
@@ -271,7 +282,7 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            showToast(data.error || 'Category update failed', 'error');
+            showToast(apiErrorMessage(data, 'Category update failed'), 'error');
             return;
         }
 
@@ -335,6 +346,11 @@
     document.getElementById('dateTo').addEventListener('change', () => loadTransactions(1));
 
     window.addEventListener('spectra-theme-change', () => {
+        loadTransactions(currentPage);
+    });
+
+    window.addEventListener('spectra-language-change', async () => {
+        await loadCategories();
         loadTransactions(currentPage);
     });
 

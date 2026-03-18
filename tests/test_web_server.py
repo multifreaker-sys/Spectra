@@ -258,3 +258,53 @@ def test_confirm_respects_apply_to_future(client: TestClient, web_settings: Sett
         learning = db.get_recent_learning_feedback(limit=10)
         assert len(learning) >= 2
         assert any(event["clean_name"] == "One-off Store" and event["apply_to_future"] is False for event in learning)
+
+
+def test_invalid_scope_returns_structured_error_with_request_id(client: TestClient) -> None:
+    response = client.get("/api/summary?scope=invalid")
+    assert response.status_code == 400
+
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_scope"
+    assert payload["error"]["request_id"]
+    assert response.headers["X-Request-ID"] == payload["error"]["request_id"]
+
+
+def test_upload_rejects_unsupported_file_type_with_structured_error(client: TestClient) -> None:
+    response = client.post(
+        "/api/upload",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "unsupported_file_type"
+
+
+def test_error_watcher_endpoint_surfaces_recent_errors(client: TestClient) -> None:
+    # Trigger a validation error event first.
+    invalid = client.post(
+        "/api/settings/rules",
+        json={"rule_type": "contains", "pattern": "", "category": ""},
+    )
+    assert invalid.status_code == 400
+
+    watcher = client.get("/api/settings/errors?window_hours=24&limit=20")
+    assert watcher.status_code == 200
+    data = watcher.json()
+    assert data["ok"] is True
+    assert data["watcher_enabled"] is True
+    assert data["total_events"] >= 1
+    assert any(event["error_code"] == "validation_error" for event in data["recent_events"])
+
+
+def test_can_store_language_preference(client: TestClient) -> None:
+    response = client.patch(
+        "/api/settings/preferences",
+        json={"language_preference": "nl"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["language_preference"] == "nl"

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import tempfile
+import secrets
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -25,6 +24,14 @@ from spectra.cycles import (
     parse_iso_date,
 )
 from spectra.db import BookmarkDB
+from spectra.error_watcher import (
+    REQUEST_ID_HEADER,
+    build_error_payload,
+    capture_error_event,
+    get_request_id,
+    init_error_monitoring,
+    resolve_language,
+)
 from spectra.recurring import detect_recurring_kind
 from spectra.rules import VALID_RULE_TYPES, normalize_rule_type
 
@@ -40,7 +47,9 @@ templates = Jinja2Templates(directory=str(_TEMPLATES))
 
 _THEME_SETTING_KEY = "theme_preference"
 _PAY_DAY_SETTING_KEY = "cycle_start_day"
+_LANGUAGE_SETTING_KEY = "language_preference"
 _VALID_THEME_PREFERENCES = {"auto", "light", "dark"}
+_VALID_LANGUAGE_PREFERENCES = {"auto", "en", "nl"}
 _VALID_SUMMARY_SCOPES = {"cycle", "90d", "ytd"}
 
 
@@ -51,15 +60,104 @@ from fastapi.responses import JSONResponse as _JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
+@app.on_event("startup")
+async def _startup_event() -> None:
+    settings = load_settings()
+    init_error_monitoring(settings)
+
+
+@app.middleware("http")
+async def _request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get(REQUEST_ID_HEADER) or secrets.token_hex(8)
+    request.state.request_id = request_id
+
+    response = await call_next(request)
+    response.headers[REQUEST_ID_HEADER] = request_id
+    return response
+
+
+def _resolve_request_language(request: Request, language_preference: str | None = None) -> str:
+    preference = language_preference
+    if preference is None:
+        try:
+            preference = _load_app_preferences().get("language_preference", "auto")
+        except Exception:
+            preference = load_settings().default_language
+    return resolve_language(preference, request.headers.get("accept-language"))
+
+
+def _api_error(
+    request: Request,
+    *,
+    status_code: int,
+    code: str,
+    fallback_message: str | None = None,
+    retryable: bool = False,
+    severity: str = "warning",
+    details: dict[str, Any] | None = None,
+    exc: Exception | None = None,
+) -> _JSONResponse:
+    settings = load_settings()
+    language = _resolve_request_language(request)
+    request_id = get_request_id(request)
+    payload = build_error_payload(
+        code=code,
+        request_id=request_id,
+        language=language,
+        retryable=retryable,
+        fallback_message=fallback_message,
+        details=details if settings.expose_debug_errors else None,
+    )
+    capture_error_event(
+        code=code,
+        status_code=status_code,
+        message=fallback_message or payload["error"]["message_en"],
+        severity=severity,
+        retryable=retryable,
+        request=request,
+        details=details,
+        exc=exc,
+        settings=settings,
+    )
+    headers = {REQUEST_ID_HEADER: request_id} if request_id else None
+    return _JSONResponse(payload, status_code=status_code, headers=headers)
+
+
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request, exc):
-    return _JSONResponse({"error": str(exc.detail)}, status_code=exc.status_code)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    status_code = int(getattr(exc, "status_code", 500))
+    if status_code == 404:
+        code = "resource_not_found"
+    elif status_code >= 500:
+        code = "http_error"
+    else:
+        code = "bad_request"
+
+    return _api_error(
+        request,
+        status_code=status_code,
+        code=code,
+        fallback_message=str(exc.detail),
+        retryable=status_code >= 500,
+        severity="error" if status_code >= 500 else "warning",
+        details={"detail": str(exc.detail), "type": "http_exception"},
+    )
 
 
 @app.exception_handler(Exception)
-async def generic_exception_handler(request, exc):
-    logger.exception("Unhandled error: %s", exc)
-    return _JSONResponse({"error": "Internal server error"}, status_code=500)
+async def generic_exception_handler(request: Request, exc: Exception):
+    request_id = get_request_id(request)
+    logger.exception("Unhandled error [%s]: %s", request_id, exc)
+    return _api_error(
+        request,
+        status_code=500,
+        code="internal_server_error",
+        fallback_message="Unhandled server exception",
+        retryable=True,
+        severity="critical",
+        details={"exception_type": exc.__class__.__name__},
+        exc=exc,
+    )
 
 
 def _get_db() -> BookmarkDB:
@@ -70,9 +168,20 @@ def _get_db() -> BookmarkDB:
 def _load_app_preferences(db: BookmarkDB | None = None) -> dict[str, Any]:
     owns_db = db is None
     db = db or _get_db()
+    settings = load_settings()
     try:
         raw_theme = (db.get_app_setting(_THEME_SETTING_KEY, "auto") or "auto").strip().lower()
         theme_preference = raw_theme if raw_theme in _VALID_THEME_PREFERENCES else "auto"
+
+        default_language = str(settings.default_language or "auto").strip().lower()
+        if default_language not in _VALID_LANGUAGE_PREFERENCES:
+            default_language = "auto"
+        raw_language = (
+            db.get_app_setting(_LANGUAGE_SETTING_KEY, default_language) or default_language
+        ).strip().lower()
+        language_preference = (
+            raw_language if raw_language in _VALID_LANGUAGE_PREFERENCES else default_language
+        )
 
         raw_pay_day = db.get_app_setting(_PAY_DAY_SETTING_KEY, str(DEFAULT_CYCLE_START_DAY))
         try:
@@ -88,6 +197,7 @@ def _load_app_preferences(db: BookmarkDB | None = None) -> dict[str, Any]:
 
     return {
         "theme_preference": theme_preference,
+        "language_preference": language_preference,
         "pay_day": pay_day,
         # Backward compatibility for older clients.
         "cycle_start_day": pay_day,
@@ -127,7 +237,17 @@ def _build_cycle_burn_rate(*, today, period_start, period_end, total_spent: floa
 
 
 def _template_context(request: Request) -> dict[str, Any]:
-    return {"request": request, **_load_app_preferences()}
+    preferences = _load_app_preferences()
+    effective_language = _resolve_request_language(
+        request,
+        preferences.get("language_preference", "auto"),
+    )
+    return {
+        "request": request,
+        "language_code": effective_language,
+        "effective_language": effective_language,
+        **preferences,
+    }
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -454,13 +574,17 @@ async def page_subscriptions(request: Request):
 
 
 @app.get("/api/summary")
-async def api_summary(scope: str = Query("cycle")):
+async def api_summary(request: Request, scope: str = Query("cycle")):
     """Return dashboard-level stats."""
     scope = (scope or "cycle").strip().lower()
     if scope not in _VALID_SUMMARY_SCOPES:
-        return JSONResponse(
-            {"error": "scope must be one of cycle, 90d, ytd"},
+        return _api_error(
+            request,
             status_code=400,
+            code="invalid_scope",
+            fallback_message="scope must be one of cycle, 90d, ytd",
+            severity="warning",
+            details={"scope": scope, "allowed": sorted(_VALID_SUMMARY_SCOPES)},
         )
 
     preferences = _load_app_preferences()
@@ -683,7 +807,14 @@ async def api_update_transaction(tx_id: str, request: Request):
         ).fetchone()
 
         if not row:
-            return JSONResponse({"error": "Transaction not found"}, status_code=404)
+            return _api_error(
+                request,
+                status_code=404,
+                code="resource_not_found",
+                fallback_message="Transaction not found",
+                severity="warning",
+                details={"tx_id": tx_id},
+            )
 
         old_name = row[0]
         original_description = str(row[1] or "")
@@ -727,13 +858,31 @@ async def api_bulk_update_category(request: Request):
     apply_to_future = _coerce_bool(body.get("apply_to_future"), True)
 
     if not isinstance(ids, list) or not ids:
-        return JSONResponse({"error": "ids must be a non-empty list"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="ids must be a non-empty list",
+            severity="warning",
+        )
     if not category:
-        return JSONResponse({"error": "category is required"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="category is required",
+            severity="warning",
+        )
 
     cleaned_ids = [str(v).strip() for v in ids if str(v).strip()]
     if not cleaned_ids:
-        return JSONResponse({"error": "ids must contain valid transaction IDs"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="ids must contain valid transaction IDs",
+            severity="warning",
+        )
 
     with _get_db() as db:
         placeholders = ",".join("?" for _ in cleaned_ids)
@@ -801,6 +950,10 @@ async def api_settings():
     return {
         "provider": settings.ai_provider,
         "currency": settings.base_currency,
+        "default_language": settings.default_language,
+        "error_watcher_enabled": settings.error_watcher_enabled,
+        "sentry_enabled": bool(settings.sentry_enabled and settings.sentry_dsn),
+        "alerts_enabled": bool(settings.error_alert_webhook_url),
         "tx_count": tx_count,
         "merchant_count": merchant_count,
         "feedback_count": feedback_count,
@@ -809,6 +962,57 @@ async def api_settings():
         "sheets_connected": bool(settings.spreadsheet_id),
         **preferences,
         "current_cycle": _build_cycle_payload(preferences["pay_day"]),
+    }
+
+
+@app.get("/api/settings/errors")
+async def api_error_watcher(
+    request: Request,
+    window_hours: int = Query(24 * 7, ge=1, le=24 * 30),
+    limit: int = Query(25, ge=1, le=200),
+):
+    """Return watcher summary, trends, and recent error events."""
+    settings = load_settings()
+    if not settings.error_watcher_enabled:
+        return {
+            "ok": True,
+            "watcher_enabled": False,
+            "window_hours": int(window_hours),
+            "total_events": 0,
+            "unique_requests": 0,
+            "server_errors": 0,
+            "severities": {},
+            "top_codes": [],
+            "top_routes": [],
+            "timeline": [],
+            "recent_events": [],
+            "sentry_enabled": bool(settings.sentry_enabled and settings.sentry_dsn),
+            "alerts_enabled": bool(settings.error_alert_webhook_url),
+        }
+
+    try:
+        with _get_db() as db:
+            overview = db.get_error_overview(
+                window_hours=window_hours,
+                recent_limit=limit,
+            )
+    except Exception as exc:
+        return _api_error(
+            request,
+            status_code=500,
+            code="operation_failed",
+            fallback_message="Failed to load error watcher data",
+            severity="error",
+            retryable=True,
+            exc=exc,
+        )
+
+    return {
+        "ok": True,
+        "watcher_enabled": True,
+        "sentry_enabled": bool(settings.sentry_enabled and settings.sentry_dsn),
+        "alerts_enabled": bool(settings.error_alert_webhook_url),
+        **overview,
     }
 
 
@@ -821,25 +1025,49 @@ async def api_update_preferences(request: Request):
     if "theme_preference" in body:
         theme_preference = str(body.get("theme_preference", "")).strip().lower()
         if theme_preference not in _VALID_THEME_PREFERENCES:
-            return JSONResponse(
-                {"error": "theme_preference must be one of auto, light, dark"},
+            return _api_error(
+                request,
                 status_code=400,
+                code="validation_error",
+                fallback_message="theme_preference must be one of auto, light, dark",
+                severity="warning",
             )
         updates[_THEME_SETTING_KEY] = theme_preference
+
+    if "language_preference" in body:
+        language_preference = str(body.get("language_preference", "")).strip().lower()
+        if language_preference not in _VALID_LANGUAGE_PREFERENCES:
+            return _api_error(
+                request,
+                status_code=400,
+                code="validation_error",
+                fallback_message="language_preference must be one of auto, en, nl",
+                severity="warning",
+            )
+        updates[_LANGUAGE_SETTING_KEY] = language_preference
 
     raw_pay_day = body.get("pay_day", body.get("cycle_start_day"))
     if raw_pay_day is not None:
         try:
             pay_day = normalize_cycle_start_day(int(raw_pay_day))
         except (TypeError, ValueError):
-            return JSONResponse(
-                {"error": f"pay_day must be an integer between 1 and {MAX_CYCLE_START_DAY}"},
+            return _api_error(
+                request,
                 status_code=400,
+                code="validation_error",
+                fallback_message=f"pay_day must be an integer between 1 and {MAX_CYCLE_START_DAY}",
+                severity="warning",
             )
         updates[_PAY_DAY_SETTING_KEY] = str(pay_day)
 
     if not updates:
-        return JSONResponse({"error": "No supported preference fields provided"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="No supported preference fields provided",
+            severity="warning",
+        )
 
     with _get_db() as db:
         for key, value in updates.items():
@@ -878,14 +1106,32 @@ async def api_create_category_rule(request: Request):
     raw_rule_type = str(body.get("rule_type") or "contains")
 
     if not pattern:
-        return JSONResponse({"error": "pattern is required"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="pattern is required",
+            severity="warning",
+        )
     if not category:
-        return JSONResponse({"error": "category is required"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="category is required",
+            severity="warning",
+        )
 
     try:
         rule_type = normalize_rule_type(raw_rule_type)
     except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message=str(exc),
+            severity="warning",
+        )
 
     if rule_type == "regex":
         import re
@@ -893,7 +1139,13 @@ async def api_create_category_rule(request: Request):
         try:
             re.compile(pattern)
         except re.error as exc:
-            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+            return _api_error(
+                request,
+                status_code=400,
+                code="validation_error",
+                fallback_message=f"Invalid regex: {exc}",
+                severity="warning",
+            )
 
     with _get_db() as db:
         rule = db.add_category_rule(rule_type=rule_type, pattern=pattern, category=category)
@@ -919,12 +1171,32 @@ async def api_update_category_rule(rule_id: int, request: Request):
                     is_active=_coerce_bool(is_active) if is_active is not None else None,
                 )
         except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            return _api_error(
+                request,
+                status_code=400,
+                code="validation_error",
+                fallback_message=str(exc),
+                severity="warning",
+            )
         except KeyError:
-            return JSONResponse({"error": "Rule not found"}, status_code=404)
+            return _api_error(
+                request,
+                status_code=404,
+                code="resource_not_found",
+                fallback_message="Rule not found",
+                severity="warning",
+                details={"rule_id": int(rule_id)},
+            )
 
     if not rule:
-        return JSONResponse({"error": "Rule not found"}, status_code=404)
+        return _api_error(
+            request,
+            status_code=404,
+            code="resource_not_found",
+            fallback_message="Rule not found",
+            severity="warning",
+            details={"rule_id": int(rule_id)},
+        )
     return {"ok": True, "rule": rule}
 
 
@@ -936,12 +1208,24 @@ async def api_test_category_rule(request: Request):
     sample_text = str(body.get("sample_text") or "").strip()
 
     if not pattern:
-        return JSONResponse({"error": "pattern is required"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="pattern is required",
+            severity="warning",
+        )
 
     try:
         rule_type = normalize_rule_type(str(body.get("rule_type") or "contains"))
     except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message=str(exc),
+            severity="warning",
+        )
 
     if rule_type == "regex":
         import re
@@ -949,7 +1233,13 @@ async def api_test_category_rule(request: Request):
         try:
             re.compile(pattern)
         except re.error as exc:
-            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+            return _api_error(
+                request,
+                status_code=400,
+                code="validation_error",
+                fallback_message=f"Invalid regex: {exc}",
+                severity="warning",
+            )
 
     with _get_db() as db:
         preview = _simulate_rule_impact(
@@ -963,12 +1253,19 @@ async def api_test_category_rule(request: Request):
 
 
 @app.delete("/api/settings/rules/{rule_id}")
-async def api_delete_category_rule(rule_id: int):
+async def api_delete_category_rule(rule_id: int, request: Request):
     """Delete a categorization rule by ID."""
     with _get_db() as db:
         deleted = db.delete_category_rule(rule_id)
     if not deleted:
-        return JSONResponse({"error": "Rule not found"}, status_code=404)
+        return _api_error(
+            request,
+            status_code=404,
+            code="resource_not_found",
+            fallback_message="Rule not found",
+            severity="warning",
+            details={"rule_id": int(rule_id)},
+        )
     return {"ok": True, "id": rule_id}
 
 
@@ -1010,9 +1307,12 @@ async def api_reset_db(request: Request):
     """Reset local SQLite data after explicit confirmation."""
     body = await request.json()
     if body.get("confirm") != "RESET":
-        return JSONResponse(
-            {"ok": False, "error": "Confirmation token missing"},
+        return _api_error(
+            request,
             status_code=400,
+            code="validation_error",
+            fallback_message="Confirmation token missing",
+            severity="warning",
         )
 
     with _get_db() as db:
@@ -1030,19 +1330,26 @@ async def api_reset_db(request: Request):
 
 
 @app.post("/api/upload")
-async def api_upload(file: UploadFile = File(...)):
+async def api_upload(request: Request, file: UploadFile = File(...)):
     """Upload a supported file, parse & categorise, stream progress via SSE."""
     supported_file_types = [".csv", ".pdf", ".ofx"]
     import json as _json
     from fastapi.responses import StreamingResponse as _SR
 
     settings = load_settings()
+    request_id = get_request_id(request)
+    language = _resolve_request_language(request)
 
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     if suffix not in supported_file_types:
-        return JSONResponse(
-            {"error": f"Unsupported file type: {suffix}. Upload a {" or ".join(supported_file_types)}"},
+        allowed = " or ".join(supported_file_types)
+        return _api_error(
+            request,
             status_code=400,
+            code="unsupported_file_type",
+            fallback_message=f"Unsupported file type: {suffix}. Upload a {allowed}",
+            severity="warning",
+            details={"suffix": suffix, "allowed": supported_file_types},
         )
 
     # Read upload content now (before streaming response starts)
@@ -1091,8 +1398,6 @@ async def api_upload(file: UploadFile = File(...)):
                 yield evt(100, "All transactions already imported", done=True,
                           transactions=[], message="All transactions already imported")
                 return
-
-            n = len(new_txns)
 
             # ── Phase 4: categorise (25% → 92%, per transaction) ───
             from spectra.ai import CategorisedTransaction
@@ -1217,8 +1522,34 @@ async def api_upload(file: UploadFile = File(...)):
                       transactions=preview, message=f"{len(preview)} new transactions")
 
         except Exception as e:
-            logger.exception("Upload stream error: %s", e)
-            yield f"data: {_json.dumps({'pct': 0, 'step': 'Error: ' + str(e), 'error': True})}\n\n"
+            logger.exception("Upload stream error [%s]: %s", request_id, e)
+            capture_error_event(
+                code="upload_processing_failed",
+                status_code=500,
+                message=str(e),
+                severity="error",
+                retryable=True,
+                request=request,
+                details={
+                    "filename": str(file.filename or ""),
+                    "suffix": suffix,
+                },
+                exc=e,
+                settings=settings,
+            )
+            payload = build_error_payload(
+                code="upload_processing_failed",
+                request_id=request_id,
+                language=language,
+                retryable=True,
+            )
+            error_payload = {
+                "pct": 0,
+                "step": payload["error"]["message"],
+                "error": True,
+                **payload["error"],
+            }
+            yield f"data: {_json.dumps(error_payload)}\n\n"
 
     return _SR(_stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache",
@@ -1234,7 +1565,13 @@ async def api_confirm(request: Request):
     transactions = body.get("transactions", [])
 
     if not transactions:
-        return {"ok": False, "message": "No transactions to save"}
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="No transactions to save",
+            severity="warning",
+        )
 
     settings = load_settings()
 
@@ -1296,6 +1633,17 @@ async def api_confirm(request: Request):
                 }
             except Exception as e:
                 logger.warning("Sheets sync failed: %s", e)
+                capture_error_event(
+                    code="sheets_sync_failed",
+                    status_code=502,
+                    message=str(e),
+                    severity="warning",
+                    retryable=True,
+                    request=request,
+                    details={"transactions_count": len(cats)},
+                    exc=e,
+                    settings=settings,
+                )
                 return {
                     "ok": True,
                     "message": f"Saved {len(cats)} transactions · learned {learned_count} future mapping(s) (Sheets sync failed)",
@@ -1401,7 +1749,14 @@ async def api_update_budget(category: str, request: Request):
     body = await request.json()
     limit = body.get("limit")
     if limit is None or limit < 0:
-        return JSONResponse({"error": "limit must be a non-negative number"}, status_code=400)
+        return _api_error(
+            request,
+            status_code=400,
+            code="validation_error",
+            fallback_message="limit must be a non-negative number",
+            severity="warning",
+            details={"category": category, "limit": limit},
+        )
 
     with _get_db() as db:
         db.save_budget_limit(category, float(limit))

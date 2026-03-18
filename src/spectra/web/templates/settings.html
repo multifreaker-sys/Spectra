@@ -21,6 +21,20 @@
             <span class="settings-badge" id="themeStatus">—</span>
         </div>
     </div>
+    <div class="settings-row">
+        <div class="settings-label">
+            Language
+            <small>Auto follows your browser language. Select Dutch or English manually if you prefer.</small>
+        </div>
+        <div class="settings-control-group">
+            <select class="settings-select" id="languagePreference" data-language-select>
+                <option value="auto">Auto</option>
+                <option value="nl">Nederlands</option>
+                <option value="en">English</option>
+            </select>
+            <span class="settings-badge" id="languageStatus">—</span>
+        </div>
+    </div>
 </div>
 
 <div class="settings-group">
@@ -139,6 +153,42 @@
 </div>
 
 <div class="settings-group">
+    <h3>Error Watcher</h3>
+    <p class="page-subtitle" style="margin: -8px 0 16px;">Central error tracking with request IDs, trend overview, and optional Sentry/webhook alerts.</p>
+    <div class="settings-stats-grid">
+        <div class="settings-stat-card">
+            <span class="settings-stat-label">Events (7d)</span>
+            <strong id="errorTotalEvents">—</strong>
+        </div>
+        <div class="settings-stat-card">
+            <span class="settings-stat-label">Server errors (5xx)</span>
+            <strong id="errorServerEvents">—</strong>
+        </div>
+        <div class="settings-stat-card">
+            <span class="settings-stat-label">Unique requests</span>
+            <strong id="errorUniqueRequests">—</strong>
+        </div>
+        <div class="settings-stat-card">
+            <span class="settings-stat-label">Top error code</span>
+            <strong id="errorTopCode">—</strong>
+        </div>
+        <div class="settings-stat-card">
+            <span class="settings-stat-label">Sentry</span>
+            <strong id="errorSentryStatus">—</strong>
+        </div>
+        <div class="settings-stat-card">
+            <span class="settings-stat-label">Alerts</span>
+            <strong id="errorAlertsStatus">—</strong>
+        </div>
+    </div>
+    <div id="errorEventsList" class="rules-list">
+        <div class="empty-state" style="padding: 18px; margin-top: 8px;">
+            <p>Loading recent error events...</p>
+        </div>
+    </div>
+</div>
+
+<div class="settings-group">
     <h3>AI Provider</h3>
     <div class="settings-row">
         <div class="settings-label">
@@ -235,6 +285,14 @@
             .replaceAll("'", '&#39;');
     }
 
+    function apiErrorMessage(payload, fallback) {
+        return window.SpectraApi?.errorMessage(payload, fallback) || fallback;
+    }
+
+    function apiRequestId(payload) {
+        return window.SpectraApi?.requestId(payload) || '';
+    }
+
     function ordSuffix(d) {
         if (d >= 11 && d <= 13) return 'th';
         switch (d % 10) {
@@ -307,7 +365,7 @@
                 });
                 const data = await res.json();
                 if (!res.ok || !data.ok) {
-                    throw new Error(data.error || 'Theme update failed');
+                    throw new Error(apiErrorMessage(data, 'Theme update failed'));
                 }
 
                 const state = window.SpectraTheme.setPreference(data.theme_preference);
@@ -325,15 +383,76 @@
         });
     }
 
+    function updateLanguagePreferenceUI(state = window.SpectraI18n?.getState()) {
+        const select = document.getElementById('languagePreference');
+        const badge = document.getElementById('languageStatus');
+        if (!select || !badge || !state) {
+            return;
+        }
+
+        select.value = state.preference;
+        if (state.preference === 'auto') {
+            badge.textContent = `Auto · Browser ${state.effectiveLanguage === 'nl' ? 'Nederlands' : 'English'}`;
+        } else {
+            badge.textContent = state.effectiveLanguage === 'nl' ? 'Nederlands' : 'English';
+        }
+        badge.className = 'settings-badge local';
+    }
+
+    function initLanguagePreference() {
+        const select = document.getElementById('languagePreference');
+        if (!select || !window.SpectraI18n) {
+            return;
+        }
+
+        updateLanguagePreferenceUI(window.SpectraI18n.getState());
+
+        select.addEventListener('change', async event => {
+            const target = event.target;
+            const nextPreference = target.value;
+            target.disabled = true;
+
+            const localState = window.SpectraI18n.setPreference(nextPreference);
+            updateLanguagePreferenceUI(localState);
+
+            try {
+                const res = await fetch('/api/settings/preferences', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ language_preference: nextPreference }),
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) {
+                    throw new Error(apiErrorMessage(data, 'Language update failed'));
+                }
+
+                const state = window.SpectraI18n.setPreference(data.language_preference || nextPreference);
+                updateLanguagePreferenceUI(state);
+                showToast(`Language set to ${state.effectiveLanguage === 'nl' ? 'Nederlands' : 'English'}`, 'info');
+            } catch (err) {
+                showToast(err.message || 'Language update failed', 'error');
+            } finally {
+                target.disabled = false;
+            }
+        });
+
+        window.addEventListener('spectra-language-change', event => {
+            updateLanguagePreferenceUI(event.detail || window.SpectraI18n.getState());
+            loadCategoryHints();
+            loadErrorWatcher();
+        });
+    }
+
     function updateCycleUI(settings) {
         setCycleDayValue(settings.pay_day || settings.cycle_start_day || 1);
         const cycle = settings.current_cycle;
         if (cycle) {
+            const locale = (window.SpectraI18n?.getLanguage() || 'en') === 'nl' ? 'nl-NL' : 'en-US';
             const startFmt = formatSpectraDate(cycle.start, { day: 'numeric', month: 'short', year: 'numeric' });
             // end is exclusive — subtract 1 day for display
             const endExclusive = parseSpectraDate(cycle.end);
             endExclusive.setDate(endExclusive.getDate() - 1);
-            const endFmt = endExclusive.toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' });
+            const endFmt = endExclusive.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
             const startEl = document.getElementById('cycleRangeStart');
             const endEl = document.getElementById('cycleRangeEnd');
             if (startEl) startEl.textContent = startFmt;
@@ -357,7 +476,7 @@
             });
             const data = await res.json();
             if (!res.ok || !data.ok) {
-                throw new Error(data.error || 'Financial cycle update failed');
+                throw new Error(apiErrorMessage(data, 'Financial cycle update failed'));
             }
 
             updateCycleUI(data);
@@ -439,7 +558,7 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            showToast(data.error || 'Rule update failed', 'error');
+            showToast(apiErrorMessage(data, 'Rule update failed'), 'error');
             await loadRules();
             return;
         }
@@ -456,7 +575,7 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            showToast(data.error || 'Rule reorder failed', 'error');
+            showToast(apiErrorMessage(data, 'Rule reorder failed'), 'error');
             return;
         }
 
@@ -480,7 +599,7 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            showToast(data.error || 'Rule creation failed', 'error');
+            showToast(apiErrorMessage(data, 'Rule creation failed'), 'error');
             return;
         }
 
@@ -499,7 +618,7 @@
         const res = await fetch(`/api/settings/rules/${ruleId}`, { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            showToast(data.error || 'Delete failed', 'error');
+            showToast(apiErrorMessage(data, 'Delete failed'), 'error');
             return;
         }
 
@@ -525,8 +644,8 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            output.textContent = data.error || 'Rule test failed';
-            showToast(data.error || 'Rule test failed', 'error');
+            output.textContent = apiErrorMessage(data, 'Rule test failed');
+            showToast(apiErrorMessage(data, 'Rule test failed'), 'error');
             return;
         }
 
@@ -581,7 +700,7 @@
         const res = await fetch('/api/settings/learning');
         const data = await res.json();
         if (!res.ok) {
-            showToast(data.error || 'Learning summary failed', 'error');
+            showToast(apiErrorMessage(data, 'Learning summary failed'), 'error');
             return;
         }
 
@@ -596,12 +715,95 @@
         const res = await fetch('/api/settings/learning/reapply', { method: 'POST' });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-            showToast(data.error || 'Reapply failed', 'error');
+            showToast(apiErrorMessage(data, 'Reapply failed'), 'error');
             return;
         }
 
         showToast(`Updated ${data.updated} historical transaction(s)`);
         await Promise.all([loadLearning(), loadSettings(), loadRules()]);
+    }
+
+    function renderErrorEvents(events) {
+        const container = document.getElementById('errorEventsList');
+        if (!events || events.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding: 18px; margin-top: 8px;">
+                    <p>No error events in the selected window.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const rows = events.map(event => {
+            const severity = String(event.severity || '').toUpperCase();
+            const reqId = event.request_id ? `<div class="table-cell-muted">req ${escapeHtml(event.request_id)}</div>` : '';
+            return `
+                <tr>
+                    <td>${escapeHtml(String(event.created_at || '').replace('T', ' ').slice(0, 19))}</td>
+                    <td><code>${escapeHtml(event.error_code || '')}</code></td>
+                    <td>
+                        ${escapeHtml(event.message || '')}
+                        ${reqId}
+                    </td>
+                    <td>${escapeHtml(event.route || '—')}</td>
+                    <td>${escapeHtml(event.method || '—')}</td>
+                    <td>${escapeHtml(String(event.status_code || ''))}</td>
+                    <td><span class="settings-badge ${severity === 'ERROR' || severity === 'CRITICAL' ? 'cloud' : ''}">${escapeHtml(severity || 'INFO')}</span></td>
+                </tr>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Code</th>
+                        <th>Message</th>
+                        <th>Route</th>
+                        <th>Method</th>
+                        <th>Status</th>
+                        <th>Severity</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    async function loadErrorWatcher() {
+        try {
+            const res = await fetch('/api/settings/errors?window_hours=168&limit=25');
+            const data = await res.json();
+            if (!res.ok || data.ok === false) {
+                showToast(apiErrorMessage(data, 'Error watcher load failed'), 'error');
+                return;
+            }
+
+            if (!data.watcher_enabled) {
+                document.getElementById('errorTotalEvents').textContent = 'Disabled';
+                document.getElementById('errorServerEvents').textContent = '—';
+                document.getElementById('errorUniqueRequests').textContent = '—';
+                document.getElementById('errorTopCode').textContent = '—';
+                document.getElementById('errorSentryStatus').textContent = data.sentry_enabled ? 'On' : 'Off';
+                document.getElementById('errorAlertsStatus').textContent = data.alerts_enabled ? 'On' : 'Off';
+                renderErrorEvents([]);
+                return;
+            }
+
+            document.getElementById('errorTotalEvents').textContent = (data.total_events || 0).toLocaleString();
+            document.getElementById('errorServerEvents').textContent = (data.server_errors || 0).toLocaleString();
+            document.getElementById('errorUniqueRequests').textContent = (data.unique_requests || 0).toLocaleString();
+            const topCode = Array.isArray(data.top_codes) && data.top_codes.length
+                ? `${data.top_codes[0].error_code} (${data.top_codes[0].count})`
+                : 'None';
+            document.getElementById('errorTopCode').textContent = topCode;
+            document.getElementById('errorSentryStatus').textContent = data.sentry_enabled ? 'On' : 'Off';
+            document.getElementById('errorAlertsStatus').textContent = data.alerts_enabled ? 'On' : 'Off';
+            renderErrorEvents(data.recent_events || []);
+        } catch (err) {
+            showToast('Error watcher load failed', 'error');
+        }
     }
 
     function syncCategoryHints() {
@@ -632,6 +834,10 @@
                 const state = window.SpectraTheme.setPreference(s.theme_preference || 'auto');
                 updateThemePreferenceUI(state);
             }
+            if (window.SpectraI18n) {
+                const state = window.SpectraI18n.setPreference(s.language_preference || 'auto');
+                updateLanguagePreferenceUI(state);
+            }
             updateCycleUI(s);
 
             // Provider badge
@@ -653,6 +859,7 @@
             document.getElementById('merchantCount').textContent = s.merchant_count.toLocaleString();
             document.getElementById('categoryCount').textContent = s.category_count.toLocaleString();
             document.getElementById('activeRuleCount').textContent = (s.active_rule_count || 0).toLocaleString();
+            await loadErrorWatcher();
         } catch (err) {
             console.error('Settings load error:', err);
         }
@@ -715,7 +922,9 @@
 
             const data = await res.json();
             if (!res.ok || !data.ok) {
-                showToast(data.error || 'Reset failed', 'error');
+                const requestId = apiRequestId(data);
+                const suffix = requestId ? ` (${requestId})` : '';
+                showToast(`${apiErrorMessage(data, 'Reset failed')}${suffix}`, 'error');
                 return;
             }
 
@@ -734,6 +943,7 @@
 
     setCycleDayValue(1);
     initThemePreference();
+    initLanguagePreference();
     loadCategoryHints();
     loadRules();
     loadLearning();

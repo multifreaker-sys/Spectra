@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ 'dark' if theme_preference == 'dark' else 'light' }}" data-theme-preference="{{ theme_preference|default('auto') }}">
+<html lang="{{ language_code|default('en') }}" data-theme="{{ 'dark' if theme_preference == 'dark' else 'light' }}" data-theme-preference="{{ theme_preference|default('auto') }}" data-language-preference="{{ language_preference|default('auto') }}">
 
 <head>
     <meta charset="UTF-8">
@@ -13,6 +13,9 @@
         const SERVER_THEME_PREFERENCE = {{ theme_preference|default('auto')|tojson }};
         const THEME_STORAGE_KEY = 'spectra-theme-preference';
         const THEME_OPTIONS = ['auto', 'light', 'dark'];
+        const SERVER_LANGUAGE_PREFERENCE = {{ language_preference|default('auto')|tojson }};
+        const LANGUAGE_STORAGE_KEY = 'spectra-language-preference';
+        const LANGUAGE_OPTIONS = ['auto', 'en', 'nl'];
 
         function safeReadStoredThemePreference() {
             try {
@@ -61,6 +64,55 @@
         }
 
         applyTheme(getThemePreference());
+
+        function safeReadStoredLanguagePreference() {
+            try {
+                const value = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+                return LANGUAGE_OPTIONS.includes(value) ? value : null;
+            } catch (_err) {
+                return null;
+            }
+        }
+
+        function safeStoreLanguagePreference(preference) {
+            try {
+                localStorage.setItem(LANGUAGE_STORAGE_KEY, preference);
+            } catch (_err) {
+                // Ignore storage failures (private mode, disabled storage, etc.)
+            }
+        }
+
+        function detectBrowserLanguage() {
+            const navLang = String(navigator.language || navigator.userLanguage || 'en').toLowerCase();
+            return navLang.startsWith('nl') ? 'nl' : 'en';
+        }
+
+        function getLanguagePreference() {
+            if (window.__spectraLanguage?.preference && LANGUAGE_OPTIONS.includes(window.__spectraLanguage.preference)) {
+                return window.__spectraLanguage.preference;
+            }
+
+            const stored = safeReadStoredLanguagePreference();
+            if (stored) {
+                return stored;
+            }
+
+            return LANGUAGE_OPTIONS.includes(SERVER_LANGUAGE_PREFERENCE) ? SERVER_LANGUAGE_PREFERENCE : 'auto';
+        }
+
+        function resolveLanguage(preference = getLanguagePreference()) {
+            return preference === 'auto' ? detectBrowserLanguage() : preference;
+        }
+
+        function applyLanguage(preference = getLanguagePreference()) {
+            const effectiveLanguage = resolveLanguage(preference);
+            document.documentElement.lang = effectiveLanguage;
+            document.documentElement.dataset.languagePreference = preference;
+            window.__spectraLanguage = { preference, effectiveLanguage };
+            return window.__spectraLanguage;
+        }
+
+        applyLanguage(getLanguagePreference());
     </script>
     <link rel="stylesheet" href="/static/styles.css?v=20260312a">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -176,6 +228,10 @@
             window.dispatchEvent(new CustomEvent('spectra-theme-change', { detail }));
         }
 
+        function emitLanguageChange(detail) {
+            window.dispatchEvent(new CustomEvent('spectra-language-change', { detail }));
+        }
+
         function syncThemeSelects() {
             const preference = getThemePreference();
             document.querySelectorAll('[data-theme-select]').forEach(select => {
@@ -191,6 +247,24 @@
             safeStoreThemePreference(normalized);
             syncThemeSelects();
             emitThemeChange(detail);
+            return detail;
+        }
+
+        function syncLanguageSelects() {
+            const preference = getLanguagePreference();
+            document.querySelectorAll('[data-language-select]').forEach(select => {
+                if (select.value !== preference) {
+                    select.value = preference;
+                }
+            });
+        }
+
+        function setLanguagePreference(preference) {
+            const normalized = LANGUAGE_OPTIONS.includes(preference) ? preference : 'auto';
+            const detail = applyLanguage(normalized);
+            safeStoreLanguagePreference(normalized);
+            syncLanguageSelects();
+            emitLanguageChange(detail);
             return detail;
         }
 
@@ -221,18 +295,32 @@
 
         syncThemeSelects();
 
+        window.SpectraI18n = {
+            getPreference: getLanguagePreference,
+            getLanguage: () => resolveLanguage(getLanguagePreference()),
+            getState: () => window.__spectraLanguage || applyLanguage(getLanguagePreference()),
+            setPreference: setLanguagePreference,
+            syncLanguageSelects,
+        };
+
+        syncLanguageSelects();
+
+        function uiLocale() {
+            return (window.SpectraI18n?.getLanguage() || 'en') === 'nl' ? 'nl-NL' : 'en-US';
+        }
+
         function parseSpectraDate(dateString) {
             return new Date(`${dateString}T00:00:00`);
         }
 
         function formatSpectraDate(dateString, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
-            return parseSpectraDate(dateString).toLocaleDateString('en', options);
+            return parseSpectraDate(dateString).toLocaleDateString(uiLocale(), options);
         }
 
         function formatCycleRange(startDate, endExclusiveDate, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
             const endDate = parseSpectraDate(endExclusiveDate);
             endDate.setDate(endDate.getDate() - 1);
-            return `${parseSpectraDate(startDate).toLocaleDateString('en', options)} -> ${endDate.toLocaleDateString('en', options)}`;
+            return `${parseSpectraDate(startDate).toLocaleDateString(uiLocale(), options)} -> ${endDate.toLocaleDateString(uiLocale(), options)}`;
         }
 
         const CATEGORY_LABELS_NL = {
@@ -268,7 +356,11 @@
         );
 
         function translateCategoryName(category) {
-            return CATEGORY_LABELS_NL[category] || category;
+            const lang = window.SpectraI18n?.getLanguage() || 'en';
+            if (lang === 'nl') {
+                return CATEGORY_LABELS_NL[category] || category;
+            }
+            return category;
         }
 
         function toCanonicalCategoryName(category) {
@@ -280,6 +372,52 @@
             translate: translateCategoryName,
             toCanonical: toCanonicalCategoryName,
             labels: CATEGORY_LABELS_NL,
+        };
+
+        function readApiErrorMessage(payload, fallback = 'Request failed') {
+            if (!payload) {
+                return fallback;
+            }
+
+            if (typeof payload.error === 'string' && payload.error.trim()) {
+                return payload.error;
+            }
+
+            if (payload.error && typeof payload.error === 'object') {
+                const err = payload.error;
+                const lang = window.SpectraI18n?.getLanguage() || 'en';
+                if (lang === 'nl' && typeof err.message_nl === 'string' && err.message_nl.trim()) {
+                    return err.message_nl;
+                }
+                if (lang === 'en' && typeof err.message_en === 'string' && err.message_en.trim()) {
+                    return err.message_en;
+                }
+                if (typeof err.message === 'string' && err.message.trim()) {
+                    return err.message;
+                }
+            }
+
+            return fallback;
+        }
+
+        function readApiErrorCode(payload) {
+            if (payload && payload.error && typeof payload.error === 'object') {
+                return String(payload.error.code || '');
+            }
+            return '';
+        }
+
+        function readApiRequestId(payload) {
+            if (payload && payload.error && typeof payload.error === 'object') {
+                return String(payload.error.request_id || '');
+            }
+            return '';
+        }
+
+        window.SpectraApi = {
+            errorMessage: readApiErrorMessage,
+            errorCode: readApiErrorCode,
+            requestId: readApiRequestId,
         };
 
         function showToast(message, type = 'success') {
@@ -298,7 +436,7 @@
         }
 
         function formatCurrency(amount) {
-            return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(amount);
+            return new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR' }).format(amount);
         }
 
         function toggleSidebar() {

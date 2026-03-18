@@ -60,7 +60,7 @@ A full-featured local dashboard at `http://localhost:8080`:
 | **Budget** | Per-category limits tracked against your active financial cycle with live 🟢/🟡/🔴 status |
 | **Trends** | Month-over-month, year-over-year, and cycle-over-cycle spending analysis |
 | **Subscriptions** | Recurring payments monitor with next charge date, monthly impact, and price-change visibility |
-| **Settings** | Theme preference, financial cycle controls, rules engine, learning center, active configuration, and local reset tools |
+| **Settings** | Theme + language preference, financial cycle controls, rules engine, learning center, error watcher diagnostics, active configuration, and local reset tools |
 
 ### Three categorization modes
 
@@ -129,6 +129,15 @@ AI_PROVIDER=local
 # Optional: Google Sheets sync
 # SPREADSHEET_ID=...
 # GOOGLE_SHEETS_CREDENTIALS_FILE=credentials.json
+
+# Optional: Error watcher / monitoring
+# ERROR_WATCHER_ENABLED=true
+# SENTRY_ENABLED=false
+# SENTRY_DSN=
+# SENTRY_ENVIRONMENT=local
+# ERROR_ALERT_WEBHOOK_URL=
+# ERROR_ALERT_THRESHOLD_COUNT=5
+# ERROR_ALERT_WINDOW_MINUTES=15
 ```
 
 ### 3) Run (web dashboard)

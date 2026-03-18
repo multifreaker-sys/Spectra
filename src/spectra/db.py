@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger("spectra.db")
@@ -65,6 +67,26 @@ CREATE TABLE IF NOT EXISTS learning_feedback (
     apply_to_future     INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS error_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at    TEXT NOT NULL,
+    request_id    TEXT NOT NULL DEFAULT '',
+    error_code    TEXT NOT NULL,
+    severity      TEXT NOT NULL,
+    message       TEXT NOT NULL,
+    status_code   INTEGER NOT NULL,
+    route         TEXT NOT NULL DEFAULT '',
+    method        TEXT NOT NULL DEFAULT '',
+    retryable     INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_error_events_created_at
+ON error_events(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_error_events_code_created_at
+ON error_events(error_code, created_at);
 """
 
 
@@ -129,6 +151,29 @@ class BookmarkDB:
                 apply_to_future      INTEGER NOT NULL DEFAULT 1,
                 created_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS error_events (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT NOT NULL,
+                request_id    TEXT NOT NULL DEFAULT '',
+                error_code    TEXT NOT NULL,
+                severity      TEXT NOT NULL,
+                message       TEXT NOT NULL,
+                status_code   INTEGER NOT NULL,
+                route         TEXT NOT NULL DEFAULT '',
+                method        TEXT NOT NULL DEFAULT '',
+                retryable     INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+        """)
+        self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_error_events_created_at
+            ON error_events(created_at)
+        """)
+        self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_error_events_code_created_at
+            ON error_events(error_code, created_at)
         """)
         self._conn.commit()
 
@@ -612,6 +657,265 @@ class BookmarkDB:
             "merchant_updates": merchant_updates,
         }
 
+    # ── Error Watcher ─────────────────────────────────────────
+
+    def record_error_event(
+        self,
+        *,
+        request_id: str,
+        error_code: str,
+        severity: str,
+        message: str,
+        status_code: int,
+        route: str,
+        method: str,
+        retryable: bool,
+        metadata: dict[str, object] | None = None,
+    ) -> int:
+        """Persist an application error event for later analytics/alerting."""
+        created_at = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True)
+        cur = self._conn.execute(
+            """
+            INSERT INTO error_events (
+                created_at,
+                request_id,
+                error_code,
+                severity,
+                message,
+                status_code,
+                route,
+                method,
+                retryable,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                created_at,
+                request_id or "",
+                error_code,
+                severity,
+                message,
+                int(status_code),
+                route or "",
+                method or "",
+                1 if retryable else 0,
+                metadata_json,
+            ),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid)
+
+    def count_error_events(
+        self,
+        *,
+        window_minutes: int,
+        error_code: str | None = None,
+        severity: str | None = None,
+    ) -> int:
+        """Count error events in the trailing window (in minutes)."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(minutes=max(1, int(window_minutes)))
+        ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+        query = "SELECT COUNT(*) FROM error_events WHERE created_at >= ?"
+        params: list[object] = [cutoff]
+
+        if error_code:
+            query += " AND error_code = ?"
+            params.append(str(error_code))
+        if severity:
+            query += " AND severity = ?"
+            params.append(str(severity))
+
+        row = self._conn.execute(query, params).fetchone()
+        return int(row[0] if row else 0)
+
+    def prune_error_events(self, *, retention_days: int) -> int:
+        """Delete error events older than *retention_days* days."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=max(1, int(retention_days)))
+        ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        cur = self._conn.execute(
+            "DELETE FROM error_events WHERE created_at < ?",
+            (cutoff,),
+        )
+        self._conn.commit()
+        return max(0, int(cur.rowcount or 0))
+
+    def get_recent_error_events(self, limit: int = 25) -> list[dict[str, object]]:
+        """Return latest error events in descending order."""
+        rows = self._conn.execute(
+            """
+            SELECT id, created_at, request_id, error_code, severity, message,
+                   status_code, route, method, retryable, metadata_json
+            FROM error_events
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+
+        events: list[dict[str, object]] = []
+        for (
+            row_id,
+            created_at,
+            request_id,
+            error_code,
+            severity,
+            message,
+            status_code,
+            route,
+            method,
+            retryable,
+            metadata_json,
+        ) in rows:
+            try:
+                metadata = json.loads(str(metadata_json or "{}"))
+                if not isinstance(metadata, dict):
+                    metadata = {}
+            except json.JSONDecodeError:
+                metadata = {}
+
+            events.append(
+                {
+                    "id": int(row_id),
+                    "created_at": str(created_at),
+                    "request_id": str(request_id or ""),
+                    "error_code": str(error_code),
+                    "severity": str(severity),
+                    "message": str(message),
+                    "status_code": int(status_code),
+                    "route": str(route or ""),
+                    "method": str(method or ""),
+                    "retryable": bool(retryable),
+                    "metadata": metadata,
+                }
+            )
+        return events
+
+    def get_error_overview(
+        self,
+        *,
+        window_hours: int = 24 * 7,
+        recent_limit: int = 25,
+    ) -> dict[str, object]:
+        """Aggregate error telemetry for watcher dashboards."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=max(1, int(window_hours)))
+        ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+        total_row = self._conn.execute(
+            "SELECT COUNT(*) FROM error_events WHERE created_at >= ?",
+            (cutoff,),
+        ).fetchone()
+        total_events = int(total_row[0] if total_row else 0)
+
+        unique_req_row = self._conn.execute(
+            """
+            SELECT COUNT(DISTINCT request_id)
+            FROM error_events
+            WHERE created_at >= ? AND request_id != ''
+            """,
+            (cutoff,),
+        ).fetchone()
+        unique_requests = int(unique_req_row[0] if unique_req_row else 0)
+
+        severity_rows = self._conn.execute(
+            """
+            SELECT severity, COUNT(*)
+            FROM error_events
+            WHERE created_at >= ?
+            GROUP BY severity
+            ORDER BY COUNT(*) DESC
+            """,
+            (cutoff,),
+        ).fetchall()
+        severities = {str(name): int(count) for name, count in severity_rows}
+
+        top_codes_rows = self._conn.execute(
+            """
+            SELECT error_code, COUNT(*) as cnt, MAX(created_at) as last_seen
+            FROM error_events
+            WHERE created_at >= ?
+            GROUP BY error_code
+            ORDER BY cnt DESC, last_seen DESC
+            LIMIT 10
+            """,
+            (cutoff,),
+        ).fetchall()
+        top_codes = [
+            {
+                "error_code": str(error_code),
+                "count": int(count),
+                "last_seen": str(last_seen),
+            }
+            for error_code, count, last_seen in top_codes_rows
+        ]
+
+        top_routes_rows = self._conn.execute(
+            """
+            SELECT route, method, COUNT(*) as cnt
+            FROM error_events
+            WHERE created_at >= ?
+            GROUP BY route, method
+            ORDER BY cnt DESC
+            LIMIT 10
+            """,
+            (cutoff,),
+        ).fetchall()
+        top_routes = [
+            {
+                "route": str(route or ""),
+                "method": str(method or ""),
+                "count": int(count),
+            }
+            for route, method, count in top_routes_rows
+        ]
+
+        timeline_rows = self._conn.execute(
+            """
+            SELECT substr(created_at, 1, 10) as day, COUNT(*) as cnt
+            FROM error_events
+            WHERE created_at >= ?
+            GROUP BY day
+            ORDER BY day ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+        timeline = [
+            {"day": str(day), "count": int(count)}
+            for day, count in timeline_rows
+        ]
+
+        server_error_row = self._conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM error_events
+            WHERE created_at >= ? AND status_code >= 500
+            """,
+            (cutoff,),
+        ).fetchone()
+        server_errors = int(server_error_row[0] if server_error_row else 0)
+
+        return {
+            "window_hours": int(window_hours),
+            "total_events": total_events,
+            "unique_requests": unique_requests,
+            "server_errors": server_errors,
+            "severities": severities,
+            "top_codes": top_codes,
+            "top_routes": top_routes,
+            "timeline": timeline,
+            "recent_events": self.get_recent_error_events(limit=recent_limit),
+        }
+
     def count(self) -> int:
         """Return total number of seen transactions."""
         row = self._conn.execute("SELECT COUNT(*) FROM seen_transactions").fetchone()
@@ -626,6 +930,7 @@ class BookmarkDB:
             "user_overrides",
             "budget_limits",
             "learning_feedback",
+            "error_events",
         ]
 
         deleted_counts: dict[str, int] = {}

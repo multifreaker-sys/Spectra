@@ -61,6 +61,23 @@ class Settings(BaseSettings):
 
     # ── Behaviour ────────────────────────────────────────────────
     log_level: str = "INFO"
+    default_language: Literal["auto", "en", "nl"] = "auto"
+
+    # ── Error Watcher ────────────────────────────────────────────
+    error_watcher_enabled: bool = True
+    error_events_retention_days: int = Field(default=90, ge=1, le=3650)
+    error_alert_webhook_url: str = ""
+    error_alert_threshold_count: int = Field(default=5, ge=1, le=1000)
+    error_alert_window_minutes: int = Field(default=15, ge=1, le=1440)
+    error_alert_timeout_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
+    expose_debug_errors: bool = False
+
+    sentry_enabled: bool = False
+    sentry_dsn: str = ""
+    sentry_environment: str = "local"
+    sentry_release: str = ""
+    sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    sentry_profiles_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
 
     # ── Validation ───────────────────────────────────────────────
     @model_validator(mode="after")
@@ -90,6 +107,9 @@ class Settings(BaseSettings):
             missing.append("OPENAI_API_KEY")
         # 'local' mode needs no API keys
 
+        if self.sentry_enabled and not self.sentry_dsn:
+            missing.append("SENTRY_DSN (required when SENTRY_ENABLED=true)")
+
         if missing:
             logger.warning(
                 "Missing secrets (some features may fail): %s", ", ".join(missing)
@@ -109,9 +129,11 @@ def load_settings() -> Settings:
     )
 
     logger.info(
-        "Spectra config loaded (provider=%s, db=%s, env=%s)",
+        "Spectra config loaded (provider=%s, db=%s, watcher=%s, sentry=%s, env=%s)",
         settings.ai_provider,
         settings.db_path,
+        settings.error_watcher_enabled,
+        settings.sentry_enabled,
         _ENV_FILE,
     )
     return settings

@@ -95,6 +95,14 @@
             .trim();
     }
 
+    function apiErrorMessage(payload, fallback) {
+        return window.SpectraApi?.errorMessage(payload, fallback) || fallback;
+    }
+
+    function apiRequestId(payload) {
+        return window.SpectraApi?.requestId(payload) || '';
+    }
+
     async function loadPreviewCategories() {
         try {
             const res = await fetch('/api/categories');
@@ -198,9 +206,19 @@
 
         try {
             const res = await fetch('/api/upload', { method: 'POST', body: form });
-
-            if (!res.ok || !res.body) {
-                throw new Error(`Server error ${res.status}`);
+            if (!res.ok) {
+                let payload = null;
+                try {
+                    payload = await res.json();
+                } catch (_err) {
+                    payload = null;
+                }
+                const requestId = apiRequestId(payload);
+                const suffix = requestId ? ` (${requestId})` : '';
+                throw new Error(`${apiErrorMessage(payload, `Server error ${res.status}`)}${suffix}`);
+            }
+            if (!res.body) {
+                throw new Error('Upload stream unavailable');
             }
 
             const reader = res.body.getReader();
@@ -226,7 +244,9 @@
                     if (event.error) {
                         proc.style.display = 'none';
                         zone.style.display = '';
-                        showToast('Error: ' + event.step, 'error');
+                        const message = String(event.message || event.step || 'Upload failed');
+                        const reqId = event.request_id ? ` (${event.request_id})` : '';
+                        showToast(`${message}${reqId}`, 'error');
                         return;
                     }
 
@@ -365,6 +385,11 @@
                 body: JSON.stringify({ transactions: previewData }),
             });
             const data = await res.json();
+            if (!res.ok || !data.ok) {
+                const requestId = apiRequestId(data);
+                const suffix = requestId ? ` (${requestId})` : '';
+                throw new Error(`${apiErrorMessage(data, 'Save failed')}${suffix}`);
+            }
             showToast(data.message || 'Transactions saved!');
 
             setTimeout(() => { window.location.href = '/transactions'; }, 1500);
@@ -374,6 +399,12 @@
             btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Confirm & Save`;
         }
     }
+
+    window.addEventListener('spectra-language-change', () => {
+        if (previewData.length) {
+            renderPreviewRows();
+        }
+    });
 
     loadPreviewCategories();
 </script>
