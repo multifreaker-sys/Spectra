@@ -52,6 +52,18 @@
         return window.SpectraTheme?.getCssVar(name, fallback) || fallback;
     }
 
+    function escapeHtml(value) {
+        const text = String(value ?? '');
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        };
+        return text.replace(/[&<>"']/g, char => map[char] || char);
+    }
+
     function categoryOptionsHtml(selected = '') {
         return categories.map(cat => {
             const isSelected = cat === selected ? 'selected' : '';
