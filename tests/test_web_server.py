@@ -371,6 +371,7 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
             category="Food & Dining",
             original_description=(
                 "Online bankieren | Naam: Cafe Test | Omschrijving: Lunch | "
+                "Rekening: NL22TEST0000000002 | "
                 "Tegenrekening: NL11TEST0000000001 | Code: SEPA | "
                 "Mededelingen: Factuur 123 | Tag: Zakelijk | "
                 "Datum/Tijd: 12-03-2026 14:37:12 | Valutadatum: 12-03-2026"
@@ -384,6 +385,7 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
     assert row["booking_time"] == "14:37"
     assert row["details"]["payment_method"] == "Online bankieren"
     assert row["details"]["counterparty"] == "Cafe Test"
+    assert row["details"]["account"] == "NL22TEST0000000002"
     assert row["details"]["counter_account"] == "NL11TEST0000000001"
     assert row["details"]["transaction_code"] == "SEPA"
     assert row["details"]["message"] == "Factuur 123"
@@ -391,6 +393,29 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
     assert row["details"]["value_date"] == "2026-03-12"
     assert "NL11TEST0000000001" in row["details"]["iban_candidates"]
     assert row["details"]["structured_fields"]["Naam"] == "Cafe Test"
+
+
+def test_transactions_infer_two_accounts_from_unlabeled_iban_sequence(
+    client: TestClient,
+    web_settings: Settings,
+) -> None:
+    with BookmarkDB(web_settings.db_path) as db:
+        seed_tx(
+            db,
+            tx_id="tx-two-ibans",
+            tx_date="2026-03-09",
+            merchant="Overboeking",
+            amount=-25.0,
+            category="Transfer In",
+            original_description="Overboeking NL10TEST0000000001 naar NL20TEST0000000002",
+        )
+
+    response = client.get("/api/transactions")
+    assert response.status_code == 200
+    payload = response.json()
+    row = next(item for item in payload["transactions"] if item["id"] == "tx-two-ibans")
+    assert row["details"]["account"] == "NL10TEST0000000001"
+    assert row["details"]["counter_account"] == "NL20TEST0000000002"
 
 
 def test_transactions_use_counterparty_for_generic_merchant_name(

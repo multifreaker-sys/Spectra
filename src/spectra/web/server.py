@@ -67,7 +67,11 @@ _KNOWN_METADATA_LABELS = [
     "Omschrijving",
     "IBAN",
     "Rekening",
+    "Rekeningnummer",
+    "Rekening nr",
     "Tegenrekening",
+    "Tegenrekeningnummer",
+    "Tegenrekening nr",
     "Code",
     "Mutatiesoort",
     "Mededelingen",
@@ -369,7 +373,11 @@ def _normalize_label(label: str) -> str:
         "omschrijving": "Omschrijving",
         "iban": "IBAN",
         "rekening": "Rekening",
+        "rekeningnummer": "Rekening",
+        "rekening nr": "Rekening",
         "tegenrekening": "Tegenrekening",
+        "tegenrekeningnummer": "Tegenrekening",
+        "tegenrekening nr": "Tegenrekening",
         "code": "Code",
         "mutatiesoort": "Mutatiesoort",
         "mededelingen": "Mededelingen",
@@ -516,10 +524,18 @@ def _extract_tx_details(
     value_date = _extract_value_date(original_description)
     payment_method = _infer_payment_method(original_description)
     structured_fields = _extract_structured_fields(original_description)
-    ibans = _IBAN_RE.findall(str(original_description or ""))
+    ibans_raw = _IBAN_RE.findall(str(original_description or ""))
+    ibans: list[str] = []
+    seen_ibans: set[str] = set()
+    for iban in ibans_raw:
+        normalized = str(iban or "").strip().upper()
+        if not normalized or normalized in seen_ibans:
+            continue
+        seen_ibans.add(normalized)
+        ibans.append(normalized)
     counterparty = _extract_counterparty(original_description, payment_method, structured_fields)
     account = _field_value(structured_fields, "Rekening")
-    counter_account = _field_value(structured_fields, "Tegenrekening", "IBAN")
+    counter_account = _field_value(structured_fields, "Tegenrekening")
     reference = _field_value(
         structured_fields,
         "Kenmerk",
@@ -533,8 +549,24 @@ def _extract_tx_details(
     running_balance = _field_value(structured_fields, "Saldo na mutatie")
     bic = _field_value(structured_fields, "BIC")
 
+    # Fill missing account fields from IBAN sequence when labels are absent.
+    if not account and ibans:
+        if counter_account and len(ibans) >= 2:
+            for iban in ibans:
+                if iban != counter_account:
+                    account = iban
+                    break
+        elif not counter_account:
+            account = ibans[0]
+
     if not counter_account and ibans:
-        counter_account = ibans[0]
+        if account and len(ibans) >= 2:
+            for iban in ibans:
+                if iban != account:
+                    counter_account = iban
+                    break
+        elif not account and ibans:
+            counter_account = ibans[0]
 
     return {
         "booking_time": booking_time,
