@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -280,6 +281,55 @@ def test_upload_rejects_unsupported_file_type_with_structured_error(client: Test
     payload = response.json()
     assert payload["ok"] is False
     assert payload["error"]["code"] == "unsupported_file_type"
+
+
+def test_upload_stream_reports_parsed_and_duplicate_counts(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    web_settings: Settings,
+) -> None:
+    with BookmarkDB(web_settings.db_path) as db:
+        seed_tx(
+            db,
+            tx_id="dup-1",
+            tx_date="2026-03-01",
+            merchant="Known Merchant",
+            amount=-10.0,
+            category="Shopping",
+            original_description="KNOWN DUPLICATE",
+        )
+
+    monkeypatch.setattr(
+        "spectra.csv_parser.parse_csv",
+        lambda *args, **kwargs: [
+            SimpleNamespace(
+                id="dup-1",
+                date="2026-03-01",
+                amount=-10.0,
+                currency="EUR",
+                raw_description="KNOWN DUPLICATE",
+            )
+        ],
+    )
+
+    response = client.post(
+        "/api/upload",
+        files={"file": ("test.csv", b"date,desc,amount\n2026-03-01,KNOWN DUPLICATE,-10.0\n", "text/csv")},
+    )
+    assert response.status_code == 200
+
+    events = [
+        json.loads(line[6:])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert events
+    final = events[-1]
+    assert final["done"] is True
+    assert final["parsed_total"] == 1
+    assert final["new_total"] == 0
+    assert final["duplicate_total"] == 1
+    assert final["transactions"] == []
 
 
 def test_error_watcher_endpoint_surfaces_recent_errors(client: TestClient) -> None:

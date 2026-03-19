@@ -1536,10 +1536,17 @@ async def api_upload(request: Request, file: UploadFile = File(...)):
                 category_rules = db.get_category_rules()
                 merchant_db = db.get_merchant_categories()
                 training_data = db.get_training_data()
+            parsed_total = len(parsed)
+            new_total = len(new_txns)
+            duplicate_total = max(parsed_total - new_total, 0)
 
             if not new_txns:
                 yield evt(100, "All transactions already imported", done=True,
-                          transactions=[], message="All transactions already imported")
+                          transactions=[],
+                          message=f"{parsed_total} parsed · 0 new · {duplicate_total} already imported",
+                          parsed_total=parsed_total,
+                          new_total=0,
+                          duplicate_total=duplicate_total)
                 return
 
             # ── Phase 4: categorise (25% → 92%, per transaction) ───
@@ -1662,7 +1669,14 @@ async def api_upload(request: Request, file: UploadFile = File(...)):
                 for t in categorised
             ]
             yield evt(100, f"{len(preview)} transactions ready", done=True,
-                      transactions=preview, message=f"{len(preview)} new transactions")
+                      transactions=preview,
+                      message=(
+                          f"{parsed_total} parsed · {len(preview)} new · "
+                          f"{duplicate_total} already imported"
+                      ),
+                      parsed_total=parsed_total,
+                      new_total=len(preview),
+                      duplicate_total=duplicate_total)
 
         except Exception as e:
             logger.exception("Upload stream error [%s]: %s", request_id, e)

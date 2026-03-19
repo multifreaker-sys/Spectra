@@ -51,6 +51,10 @@
         <strong>Review mode</strong>
         <span>Edit merchants/categories inline. Use “Apply to similar” to propagate fixes in the current batch. “Learn” stores the correction for future imports.</span>
     </div>
+    <div class="inline-banner" id="previewUploadStats" style="display:none;">
+        <strong>Upload summary</strong>
+        <span id="previewUploadStatsText"></span>
+    </div>
 
     <div class="table-container">
         <table>
@@ -272,7 +276,7 @@
                     if (event.done) {
                         proc.style.display = 'none';
                         if (!event.transactions || event.transactions.length === 0) {
-                            showToast(event.message || 'All transactions already imported', 'error');
+                            showToast(event.message || 'All transactions already imported', 'info');
                             zone.style.display = '';
                             return;
                         }
@@ -280,7 +284,7 @@
                             ...item,
                             apply_to_future: item.apply_to_future !== false,
                         }));
-                        showPreview(previewData, event.message);
+                        showPreview(previewData, event.message, event);
                     }
                 }
             }
@@ -292,10 +296,32 @@
         }
     }
 
-    function showPreview(txns, message) {
+    function showPreview(txns, message, stats = null) {
         document.getElementById('previewTitle').textContent = message || `${txns.length} transactions`;
+        updatePreviewStats(stats, txns.length);
         renderPreviewRows();
         document.getElementById('previewSection').classList.add('visible');
+    }
+
+    function updatePreviewStats(stats, fallbackNew = 0) {
+        const banner = document.getElementById('previewUploadStats');
+        const text = document.getElementById('previewUploadStatsText');
+        if (!banner || !text) {
+            return;
+        }
+
+        const parsed = Number(stats?.parsed_total || 0);
+        const duplicates = Number(stats?.duplicate_total || 0);
+        const fresh = Number(stats?.new_total || fallbackNew || 0);
+
+        if (parsed <= 0 && duplicates <= 0 && fresh <= 0) {
+            banner.style.display = 'none';
+            text.textContent = '';
+            return;
+        }
+
+        text.textContent = `${parsed} found · ${fresh} new · ${duplicates} already imported`;
+        banner.style.display = 'flex';
     }
 
     /**
@@ -386,6 +412,7 @@
     function cancelPreview() {
         document.getElementById('previewSection').classList.remove('visible');
         document.getElementById('uploadZone').style.display = '';
+        updatePreviewStats(null, 0);
         previewData = [];
         fileInput.value = '';
     }
