@@ -109,8 +109,11 @@ class TestParseCsv:
         txns = parse_csv(csv)
         assert len(txns) == 2
         assert txns[0].date == "2026-02-22"
-        assert txns[0].raw_description == "JUMBO SUPERMARKT"
+        assert txns[0].raw_description.startswith("JUMBO SUPERMARKT")
+        assert "Rekening: NL00INGB0000000000" in txns[0].raw_description
+        assert "Mutatiesoort: Betaalpas" in txns[0].raw_description
         assert txns[0].amount == -4.5
+        assert "Mutatiesoort: Overboeking" in txns[1].raw_description
         assert txns[1].amount == 1500.0
 
     def test_long_merchant_name_not_cleaned_to_empty(self, tmp_path: Path) -> None:
@@ -162,3 +165,25 @@ class TestParseCsv:
     def test_file_not_found(self) -> None:
         with pytest.raises(FileNotFoundError):
             parse_csv("/nonexistent/file.csv")
+
+    def test_metadata_columns_enrich_description_without_changing_id(self, tmp_path: Path) -> None:
+        """Optional metadata should enrich context while preserving dedup ID stability."""
+        plain_csv = tmp_path / "plain.csv"
+        plain_csv.write_text(dedent("""\
+            Date,Description,Amount
+            2026-02-22,CONSUMER BOND,-7.50
+        """))
+
+        rich_csv = tmp_path / "rich.csv"
+        rich_csv.write_text(dedent("""\
+            Datum;Naam / Omschrijving;Rekening;Tegenrekening;Code;Af Bij;Bedrag (EUR);Mutatiesoort;Mededelingen;Tag
+            22-02-2026;CONSUMER BOND;NL11INGB0000000000;NL22INGB0000000000;SEPA;Af;7,50;Incasso;Contributie;Vast
+        """))
+
+        plain_tx = parse_csv(plain_csv)[0]
+        rich_tx = parse_csv(rich_csv)[0]
+
+        assert plain_tx.id == rich_tx.id
+        assert "Tegenrekening: NL22INGB0000000000" in rich_tx.raw_description
+        assert "Code: SEPA" in rich_tx.raw_description
+        assert "Mededelingen: Contributie" in rich_tx.raw_description

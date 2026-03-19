@@ -682,6 +682,31 @@ td.amount.income {
     gap: 8px 14px;
 }
 
+.tx-details-more {
+    margin-top: 10px;
+    border-top: 1px dashed var(--border-light);
+    padding-top: 8px;
+}
+
+.tx-details-more summary {
+    cursor: pointer;
+    list-style: none;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.tx-details-more summary::-webkit-details-marker {
+    display: none;
+}
+
+.tx-details-grid-more {
+    margin-top: 10px;
+}
+
 .tx-detail-item,
 .tx-detail-raw {
     display: flex;

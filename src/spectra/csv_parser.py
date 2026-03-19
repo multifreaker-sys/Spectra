@@ -165,6 +165,18 @@ _CURRENCY_ALIASES = {
     "valuta", "currency", "divisa", "moneta"
 }
 
+_STRUCTURED_METADATA_ALIASES: dict[str, set[str]] = {
+    # Dutch bank exports (ING/Rabobank/ABN variants)
+    "Rekening": {"rekening", "rekeningnummer", "account", "account number"},
+    "Tegenrekening": {"tegenrekening", "counter account", "counterparty account"},
+    "Code": {"code", "transaction code"},
+    "Mutatiesoort": {"mutatiesoort", "transaction type", "type"},
+    "Mededelingen": {"mededelingen", "message", "messages"},
+    "Saldo na mutatie": {"saldo na mutatie", "running balance", "balance after transaction"},
+    "Tag": {"tag", "label"},
+    "Kenmerk": {"kenmerk", "reference", "betalingskenmerk"},
+}
+
 def _map_columns(headers: list[str]) -> dict[str, int]:
     """Find the indices of required columns based on known aliases."""
     mapping: dict[str, int] = {}
@@ -188,6 +200,62 @@ def _map_columns(headers: list[str]) -> dict[str, int]:
             mapping.setdefault("currency", i)
 
     return mapping
+
+
+def _map_metadata_columns(headers: list[str], core_mapping: dict[str, int]) -> list[tuple[str, int]]:
+    """Map optional metadata columns while skipping already-mapped core columns."""
+    used_indices = set(core_mapping.values())
+    mapped: list[tuple[str, int]] = []
+
+    for i, h_raw in enumerate(headers):
+        if i in used_indices:
+            continue
+        normalized = _normalize(h_raw.replace("\xa0", " "))
+        for label, aliases in _STRUCTURED_METADATA_ALIASES.items():
+            if normalized in aliases:
+                mapped.append((label, i))
+                break
+    return mapped
+
+
+def _append_structured_metadata(
+    description: str,
+    row: list[str],
+    metadata_columns: list[tuple[str, int]],
+) -> str:
+    """Append selected metadata as `Label: value` pairs for richer downstream parsing."""
+    if not metadata_columns:
+        return description
+
+    normalized_description = str(description or "").lower()
+    seen_values: set[str] = set()
+    metadata_parts: list[str] = []
+    for label, idx in metadata_columns:
+        if idx >= len(row):
+            continue
+        value = re.sub(r"\s+", " ", row[idx].strip())
+        if not value:
+            continue
+
+        lowered = value.lower()
+        if lowered in {"-", "n.v.t.", "nvt", "null", "none"}:
+            continue
+        if lowered in seen_values:
+            continue
+        seen_values.add(lowered)
+
+        # Don't repeat plain values that are already visible in the cleaned description.
+        if len(value) >= 5 and lowered in normalized_description:
+            continue
+        metadata_parts.append(f"{label}: {value}")
+
+    if not metadata_parts:
+        return description
+
+    base = str(description or "").strip()
+    if not base:
+        return " | ".join(metadata_parts)
+    return f"{base} | {' | '.join(metadata_parts)}"
 
 
 def _clean_description(text: str) -> str:
@@ -300,10 +368,13 @@ def parse_csv(
     headers = rows[header_idx]
     data_rows = rows[header_idx + 1:]
     col = _map_columns(headers)
+    metadata_columns = _map_metadata_columns(headers, col)
 
     logger.info(
         "Headers: %s → mapped: %s", headers, col
     )
+    if metadata_columns:
+        logger.info("Metadata columns mapped: %s", metadata_columns)
 
     if "date" not in col:
         raise ValueError(
@@ -345,10 +416,11 @@ def parse_csv(
                 if detail and detail.lower() != raw_desc.lower():
                     raw_desc = f"{raw_desc} | {detail}"
             
-            description = _clean_description(raw_desc)
-            if not description:
+            description_for_id = _clean_description(raw_desc)
+            if not description_for_id:
                 # Safety fallback: never lose merchant information entirely.
-                description = raw_desc.strip()
+                description_for_id = raw_desc.strip()
+            description = _append_structured_metadata(description_for_id, row, metadata_columns)
 
             # Amount: either a single column or split credit/debit
             if "amount" in col:
@@ -370,17 +442,17 @@ def parse_csv(
                 # Credits are positive, debits are negative
                 amount = abs(credit) - abs(debit)
 
-            tx_id = _make_id(date, description, amount)
+            tx_id = _make_id(date, description_for_id, amount)
             if tx_id in seen_ids:
                 # Disambiguate truly distinct same-day same-amount duplicates
                 # using the full row payload (stable across re-imports).
                 row_fingerprint = "|".join(cell.strip() for cell in row)
-                tx_id = _make_id(date, description, amount, fingerprint=row_fingerprint)
+                tx_id = _make_id(date, description_for_id, amount, fingerprint=row_fingerprint)
                 suffix = 2
                 while tx_id in seen_ids:
                     tx_id = _make_id(
                         date,
-                        description,
+                        description_for_id,
                         amount,
                         fingerprint=f"{row_fingerprint}|dup#{suffix}",
                     )

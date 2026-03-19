@@ -370,9 +370,10 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
             amount=-8.5,
             category="Food & Dining",
             original_description=(
-                "Online bankieren Naam: Cafe Test Omschrijving: Lunch "
-                "IBAN: NL11TEST0000000001 Datum/Tijd: 12-03-2026 14:37:12 "
-                "Valutadatum: 12-03-2026"
+                "Online bankieren | Naam: Cafe Test | Omschrijving: Lunch | "
+                "Tegenrekening: NL11TEST0000000001 | Code: SEPA | "
+                "Mededelingen: Factuur 123 | Tag: Zakelijk | "
+                "Datum/Tijd: 12-03-2026 14:37:12 | Valutadatum: 12-03-2026"
             ),
         )
 
@@ -382,6 +383,11 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
     row = next(item for item in payload["transactions"] if item["id"] == "tx-time-hint")
     assert row["booking_time"] == "14:37"
     assert row["details"]["payment_method"] == "Online bankieren"
+    assert row["details"]["counterparty"] == "Cafe Test"
+    assert row["details"]["counter_account"] == "NL11TEST0000000001"
+    assert row["details"]["transaction_code"] == "SEPA"
+    assert row["details"]["message"] == "Factuur 123"
+    assert row["details"]["tag"] == "Zakelijk"
     assert row["details"]["value_date"] == "2026-03-12"
     assert "NL11TEST0000000001" in row["details"]["iban_candidates"]
     assert row["details"]["structured_fields"]["Naam"] == "Cafe Test"

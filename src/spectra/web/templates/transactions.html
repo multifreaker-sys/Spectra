@@ -98,49 +98,115 @@
         return `tx-detail-${safe}`;
     }
 
+    function normalizeMetaKey(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function toDisplayMetaDate(value) {
+        const raw = String(value || '').trim();
+        if (!raw) {
+            return '';
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            return formatSpectraDate(raw, { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+        return raw;
+    }
+
     function detailRowsFromTx(tx) {
         const details = tx.details || {};
-        const rows = [];
-        const push = (label, value) => {
+        const primaryRows = [];
+        const extraRows = [];
+        const consumedKeys = new Set();
+        const remember = (...keys) => {
+            keys.forEach(key => {
+                const normalized = normalizeMetaKey(key);
+                if (normalized) {
+                    consumedKeys.add(normalized);
+                }
+            });
+        };
+        const pushPrimary = (label, value, keyAliases = []) => {
             if (value === null || value === undefined) return;
             const text = String(value).trim();
             if (!text) return;
-            rows.push({ label, value: text });
+            primaryRows.push({ label, value: text });
+            remember(label, ...keyAliases);
         };
 
-        push('Boekingstijd', details.booking_time || tx.booking_time);
-        push('Valutadatum', details.value_date);
-        push('Betaalmethode', details.payment_method);
+        pushPrimary('Boekingstijd', details.booking_time || tx.booking_time, ['Datum/Tijd']);
+        pushPrimary('Valutadatum', toDisplayMetaDate(details.value_date), ['Value Date']);
+        pushPrimary('Betaalmethode', details.payment_method, ['Payment Method']);
+        pushPrimary('Tegenpartij', details.counterparty, ['Naam', 'Overige partij']);
+        pushPrimary('Rekening', details.account);
+        pushPrimary('Tegenrekening', details.counter_account, ['IBAN']);
+        pushPrimary('Kenmerk', details.reference, ['Betalingskenmerk', 'Machtigingskenmerk']);
+        pushPrimary('Code', details.transaction_code);
+        pushPrimary('Mutatiesoort', details.mutation_type, ['Transactie']);
+        pushPrimary('Mededelingen', details.message);
+        pushPrimary('Tag', details.tag);
+        pushPrimary('BIC', details.bic);
+        pushPrimary('Saldo na mutatie', details.running_balance);
 
         const ibans = Array.isArray(details.iban_candidates) ? details.iban_candidates.filter(Boolean).slice(0, 3) : [];
-        if (ibans.length) {
-            push('IBAN(s)', ibans.join(', '));
+        if (ibans.length && !consumedKeys.has('iban')) {
+            pushPrimary('IBAN(s)', ibans.join(', '), ['IBAN']);
         }
 
         const structured = details.structured_fields && typeof details.structured_fields === 'object'
             ? details.structured_fields
             : {};
         Object.entries(structured).forEach(([key, value]) => {
-            push(key, value);
+            const normalizedKey = normalizeMetaKey(key);
+            if (consumedKeys.has(normalizedKey)) {
+                return;
+            }
+            if (value === null || value === undefined) {
+                return;
+            }
+            const text = String(value).trim();
+            if (!text) {
+                return;
+            }
+            extraRows.push({ label: key, value: text });
         });
 
-        return rows;
+        return { primaryRows, extraRows };
     }
 
     function renderTxDetailsPanel(tx) {
-        const detailRows = detailRowsFromTx(tx);
+        const { primaryRows, extraRows } = detailRowsFromTx(tx);
         const description = String(tx.details?.original_description || '').trim();
 
-        if (!detailRows.length && !description) {
+        if (!primaryRows.length && !extraRows.length && !description) {
             return `<div class="tx-details-empty">Geen extra metadata beschikbaar voor deze boeking.</div>`;
         }
 
-        const rowsHtml = detailRows.map(item => `
+        const rowsHtml = primaryRows.map(item => `
             <div class="tx-detail-item">
                 <span class="tx-detail-label">${escapeHtml(item.label)}</span>
                 <span class="tx-detail-value">${escapeHtml(item.value)}</span>
             </div>
         `).join('');
+
+        const moreHtml = extraRows.length
+            ? `
+                <details class="tx-details-more">
+                    <summary>Meer metadata (${extraRows.length})</summary>
+                    <div class="tx-details-grid tx-details-grid-more">
+                        ${extraRows.map(item => `
+                            <div class="tx-detail-item">
+                                <span class="tx-detail-label">${escapeHtml(item.label)}</span>
+                                <span class="tx-detail-value">${escapeHtml(item.value)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </details>
+            `
+            : '';
 
         const rawHtml = description
             ? `<div class="tx-detail-raw"><span class="tx-detail-label">Ruwe omschrijving</span><span class="tx-detail-value">${escapeHtml(description)}</span></div>`
@@ -151,6 +217,7 @@
                 <div class="tx-details-grid">
                     ${rowsHtml}
                 </div>
+                ${moreHtml}
                 ${rawHtml}
             </div>
         `;

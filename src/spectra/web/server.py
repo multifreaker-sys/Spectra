@@ -66,7 +66,19 @@ _KNOWN_METADATA_LABELS = [
     "Naam",
     "Omschrijving",
     "IBAN",
+    "Rekening",
+    "Tegenrekening",
+    "Code",
+    "Mutatiesoort",
+    "Mededelingen",
+    "Saldo na mutatie",
+    "Tag",
+    "BIC",
+    "Datum/Tijd",
+    "Valutadatum",
     "Kenmerk",
+    "Betalingskenmerk",
+    "Machtigingskenmerk",
     "Machtiging ID",
     "Incassant ID",
     "Overige partij",
@@ -77,10 +89,10 @@ _KNOWN_METADATA_LABELS = [
 _LABEL_CAPTURE_RE = re.compile(
     r"(?P<label>"
     + "|".join(re.escape(label) for label in _KNOWN_METADATA_LABELS)
-    + r"):\s*(?P<value>.*?)(?=\s+(?:"
+    + r"):\s*(?P<value>.*?)(?=(?:\s*\|\s*|\s+)(?:"
     + "|".join(re.escape(label) for label in _KNOWN_METADATA_LABELS)
     + r"):|$)",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -337,7 +349,19 @@ def _normalize_label(label: str) -> str:
         "naam": "Naam",
         "omschrijving": "Omschrijving",
         "iban": "IBAN",
+        "rekening": "Rekening",
+        "tegenrekening": "Tegenrekening",
+        "code": "Code",
+        "mutatiesoort": "Mutatiesoort",
+        "mededelingen": "Mededelingen",
+        "saldo na mutatie": "Saldo na mutatie",
+        "tag": "Tag",
+        "bic": "BIC",
+        "datum/tijd": "Datum/Tijd",
+        "valutadatum": "Valutadatum",
         "kenmerk": "Kenmerk",
+        "betalingskenmerk": "Betalingskenmerk",
+        "machtigingskenmerk": "Machtigingskenmerk",
         "machtiging id": "Machtiging ID",
         "incassant id": "Incassant ID",
         "overige partij": "Overige partij",
@@ -378,6 +402,61 @@ def _infer_payment_method(original_description: str) -> str:
     return ""
 
 
+def _field_value(fields: dict[str, str], *labels: str) -> str:
+    for label in labels:
+        value = str(fields.get(label, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def _extract_counterparty(
+    original_description: str,
+    payment_method: str,
+    structured_fields: dict[str, str],
+) -> str:
+    direct = _field_value(structured_fields, "Naam", "Overige partij")
+    if direct:
+        return direct
+
+    text = str(original_description or "").strip()
+    if not text:
+        return ""
+
+    # Keep the first description chunk; metadata key-value pairs often follow after "|".
+    head = text.split("|", 1)[0].strip()
+    if not head:
+        head = text
+
+    # Remove known payment-method markers when they are embedded in the raw description.
+    tokens = [
+        payment_method,
+        "Incasso",
+        "Overschrijving",
+        "Online bankieren",
+        "iDEAL",
+        "Betaalautomaat",
+        "Kaartbetaling",
+        "Diversen",
+    ]
+    for token in tokens:
+        token = str(token or "").strip()
+        if not token:
+            continue
+        head = re.sub(rf"\b{re.escape(token)}\b", "", head, flags=re.IGNORECASE)
+
+    # Remove IBAN-like tokens from the counterparty guess.
+    for iban in _IBAN_RE.findall(head.upper()):
+        head = re.sub(re.escape(iban), "", head, flags=re.IGNORECASE)
+
+    head = re.sub(r"\s+", " ", head).strip(" -|,")
+    if not head:
+        return ""
+    if payment_method and head.lower() == payment_method.lower():
+        return ""
+    return head
+
+
 def _extract_tx_details(
     *,
     date_value: str,
@@ -388,11 +467,39 @@ def _extract_tx_details(
     payment_method = _infer_payment_method(original_description)
     structured_fields = _extract_structured_fields(original_description)
     ibans = _IBAN_RE.findall(str(original_description or ""))
+    counterparty = _extract_counterparty(original_description, payment_method, structured_fields)
+    account = _field_value(structured_fields, "Rekening")
+    counter_account = _field_value(structured_fields, "Tegenrekening", "IBAN")
+    reference = _field_value(
+        structured_fields,
+        "Kenmerk",
+        "Betalingskenmerk",
+        "Machtigingskenmerk",
+    )
+    transaction_code = _field_value(structured_fields, "Code")
+    mutation_type = _field_value(structured_fields, "Mutatiesoort", "Transactie")
+    message = _field_value(structured_fields, "Mededelingen")
+    tag = _field_value(structured_fields, "Tag")
+    running_balance = _field_value(structured_fields, "Saldo na mutatie")
+    bic = _field_value(structured_fields, "BIC")
+
+    if not counter_account and ibans:
+        counter_account = ibans[0]
 
     return {
         "booking_time": booking_time,
         "value_date": value_date,
         "payment_method": payment_method,
+        "counterparty": counterparty,
+        "account": account,
+        "counter_account": counter_account,
+        "reference": reference,
+        "transaction_code": transaction_code,
+        "mutation_type": mutation_type,
+        "message": message,
+        "tag": tag,
+        "running_balance": running_balance,
+        "bic": bic,
         "iban_candidates": ibans[:3],
         "structured_fields": structured_fields,
         "original_description": str(original_description or ""),
