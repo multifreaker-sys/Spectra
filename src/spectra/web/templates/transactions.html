@@ -141,6 +141,9 @@
         pushPrimary('Valutadatum', toDisplayMetaDate(details.value_date), ['Value Date']);
         pushPrimary('Betaalmethode', details.payment_method, ['Payment Method']);
         pushPrimary('Tegenpartij', details.counterparty, ['Naam', 'Overige partij']);
+        if (details.paper_name && String(details.paper_name).trim()) {
+            pushPrimary('Naam op afschrift', details.paper_name, ['Naam']);
+        }
         const isOutgoing = Number(tx.amount || 0) < 0;
         const fromAccount = isOutgoing ? details.account : details.counter_account;
         const toAccount = isOutgoing ? details.counter_account : details.account;

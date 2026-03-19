@@ -8,9 +8,14 @@ from pathlib import Path
 
 from spectra.csv_parser import (
     ParsedTransaction,
+    _DIRECTION_CREDIT_VALUES,
+    _DIRECTION_DEBIT_VALUES,
+    _append_structured_metadata,
     _detect_delimiter,
     _make_id,
     _map_columns,
+    _map_metadata_columns,
+    _normalize,
     _parse_amount,
     _parse_date,
 )
@@ -108,6 +113,7 @@ def _rows_to_transactions(
 ) -> list[ParsedTransaction]:
     """Convert table rows to ParsedTransaction objects using column mapping."""
     col = _map_columns(header)
+    metadata_columns = _map_metadata_columns(header, col)
     transactions: list[ParsedTransaction] = []
     skipped = 0
 
@@ -122,13 +128,20 @@ def _rows_to_transactions(
             if not raw_date:
                 continue
             date = _parse_date(raw_date)
-            description = row[col.get("description", -1)].strip() if "description" in col else ""
+            description_for_id = row[col.get("description", -1)].strip() if "description" in col else ""
+            description = _append_structured_metadata(description_for_id, row, metadata_columns)
 
             if "amount" in col:
                 raw_amount = row[col["amount"]].strip()
                 if not raw_amount:
                     continue
                 amount = _parse_amount(raw_amount)
+                if "direction" in col and col["direction"] < len(row):
+                    direction = _normalize(row[col["direction"]]).replace(".", "")
+                    if direction in _DIRECTION_DEBIT_VALUES:
+                        amount = -abs(amount)
+                    elif direction in _DIRECTION_CREDIT_VALUES:
+                        amount = abs(amount)
             else:
                 raw_credit = row[col["credit"]].strip() if "credit" in col else ""
                 raw_debit = row[col["debit"]].strip() if "debit" in col else ""
@@ -137,7 +150,9 @@ def _rows_to_transactions(
                 amount = abs(credit) - abs(debit)
 
             transactions.append(ParsedTransaction(
-                id=_make_id(date, description, amount),
+                # Keep ID based on primary merchant/date/amount so metadata parser
+                # improvements do not break dedup continuity.
+                id=_make_id(date, description_for_id, amount),
                 date=date,
                 amount=amount,
                 currency=currency,

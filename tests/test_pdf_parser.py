@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from spectra.pdf_parser import _extract_from_text_with_pypdf
+from spectra.pdf_parser import _extract_from_tables, _extract_from_text_with_pypdf
 
 
 def test_extract_from_text_with_pypdf_parses_valid_lines(tmp_path: Path) -> None:
@@ -58,3 +58,40 @@ def test_extract_from_text_with_pypdf_skips_non_matching_lines(tmp_path: Path) -
     assert txns[0].date == "2026-02-22"
     assert txns[0].amount == -19.99
     assert txns[0].raw_description == "AMAZON"
+
+
+def test_extract_from_tables_includes_structured_metadata_columns() -> None:
+    class _Page:
+        def extract_tables(self):  # noqa: D401
+            return [[
+                [
+                    "Datum", "Naam / Omschrijving", "Rekening", "Tegenrekening",
+                    "Code", "Af Bij", "Bedrag (EUR)", "Mutatiesoort", "Mededelingen",
+                ],
+                [
+                    "20260212",
+                    "PayPal Europe S.a.r.l. et Cie S.C.A",
+                    "NL95INGB0755517148",
+                    "LU89751000135104200E",
+                    "IC",
+                    "Af",
+                    "11,90",
+                    "Incasso",
+                    "Naam: PayPal Europe S.a.r.l. et Cie S.C.A Omschrijving: 1048210378484/PAYPAL "
+                    "IBAN: LU89751000135104200E Kenmerk: 1048210378484 Machtiging ID: 4YGJ224UUT4Q2",
+                ],
+            ]]
+
+    class _Pdf:
+        pages = [_Page()]
+
+    txns = _extract_from_tables(_Pdf(), "EUR")
+    assert len(txns) == 1
+    row = txns[0]
+    assert row.date == "2026-02-12"
+    assert row.amount == -11.9
+    assert row.raw_description.startswith("PayPal Europe S.a.r.l. et Cie S.C.A")
+    assert "Rekening: NL95INGB0755517148" in row.raw_description
+    assert "Tegenrekening: LU89751000135104200E" in row.raw_description
+    assert "Mutatiesoort: Incasso" in row.raw_description
+    assert "Mededelingen: Naam: PayPal Europe S.a.r.l. et Cie S.C.A" in row.raw_description

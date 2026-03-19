@@ -440,3 +440,60 @@ def test_transactions_use_counterparty_for_generic_merchant_name(
     assert row["merchant"] == "Consumentenbond"
     assert row["details"]["payment_method"] == "Incasso"
     assert row["details"]["counterparty"] == "Consumentenbond"
+
+
+def test_transactions_normalize_display_title_but_keep_paper_name(
+    client: TestClient,
+    web_settings: Settings,
+) -> None:
+    with BookmarkDB(web_settings.db_path) as db:
+        seed_tx(
+            db,
+            tx_id="tx-uppercase-merchant",
+            tx_date="2026-03-08",
+            merchant="CONSUMENTENBOND",
+            amount=-7.5,
+            category="Education",
+            original_description=(
+                "CONSUMENTENBOND | Naam: CONSUMENTENBOND | "
+                "Omschrijving: Lidmaatschap | IBAN: NL31ABNA0484848488"
+            ),
+        )
+
+    response = client.get("/api/transactions?search=consumentenbond")
+    assert response.status_code == 200
+    payload = response.json()
+    row = next(item for item in payload["transactions"] if item["id"] == "tx-uppercase-merchant")
+    assert row["merchant"] == "Consumentenbond"
+    assert row["details"]["paper_name"] == "CONSUMENTENBOND"
+
+
+def test_transactions_extract_paper_name_from_nested_mededelingen(
+    client: TestClient,
+    web_settings: Settings,
+) -> None:
+    with BookmarkDB(web_settings.db_path) as db:
+        seed_tx(
+            db,
+            tx_id="tx-nested-name",
+            tx_date="2026-03-07",
+            merchant="INCASSO",
+            amount=-11.9,
+            category="Shopping",
+            original_description=(
+                "PayPal Europe S.a.r.l. et Cie S.C.A | Rekening: NL95INGB0755517148 | "
+                "Tegenrekening: LU89751000135104200E | Code: IC | Mutatiesoort: Incasso | "
+                "Mededelingen: Naam: PayPal Europe S.a.r.l. et Cie S.C.A "
+                "Omschrijving: 1048210378484/PAYPAL IBAN: LU89751000135104200E "
+                "Kenmerk: 1048210378484 Machtiging ID: 4YGJ224UUT4Q2"
+            ),
+        )
+
+    response = client.get("/api/transactions?search=paypal")
+    assert response.status_code == 200
+    payload = response.json()
+    row = next(item for item in payload["transactions"] if item["id"] == "tx-nested-name")
+    assert row["merchant"] == "PayPal Europe S.a.r.l. et Cie S.C.A"
+    assert row["details"]["paper_name"] == "PayPal Europe S.a.r.l. et Cie S.C.A"
+    assert row["details"]["transaction_code"] == "IC"
+    assert row["details"]["mutation_type"] == "Incasso"

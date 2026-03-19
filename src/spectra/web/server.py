@@ -117,6 +117,20 @@ _GENERIC_MERCHANT_NAMES = {
     "betaling pin",
     "pin",
 }
+_LOWERCASE_NAME_PARTS = {
+    "van",
+    "de",
+    "den",
+    "der",
+    "het",
+    "en",
+    "op",
+    "te",
+    "tot",
+    "met",
+    "via",
+    "et",
+}
 
 
 # ── Global error handler ─────────────────────────────────────────
@@ -409,6 +423,21 @@ def _extract_structured_fields(original_description: str) -> dict[str, str]:
         if not value:
             continue
         fields[label] = value
+
+    # Some PDF table exports flatten rich label/value blocks into the value of one
+    # parent field (commonly "Mededelingen"). Parse nested labels as well.
+    nested_sources = [str(fields.get("Mededelingen", "")), str(fields.get("Omschrijving", ""))]
+    for nested_text in nested_sources:
+        if ":" not in nested_text:
+            continue
+        for match in _LABEL_CAPTURE_RE.finditer(nested_text):
+            label = _normalize_label(match.group("label"))
+            if label in fields:
+                continue
+            value = re.sub(r"\s+", " ", str(match.group("value") or "")).strip()
+            if not value:
+                continue
+            fields[label] = value
     return fields
 
 
@@ -441,14 +470,59 @@ def _normalize_match_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def _normalize_display_merchant_name(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return ""
+
+    # Strip trailing payment-method suffixes from titles.
+    method_suffix = re.compile(
+        r"(?i)\b(?:incasso|overschrijving|overboeking|online bankieren|betaalautomaat|kaartbetaling|ideal|i deal|diversen)\b$"
+    )
+    previous = None
+    while previous != text:
+        previous = text
+        text = method_suffix.sub("", text).strip(" .|,;:-")
+
+    if not text:
+        return ""
+
+    force_title_case = text.isupper() or text.islower()
+    if not force_title_case:
+        return text
+
+    tokens = text.split(" ")
+    normalized_tokens: list[str] = []
+    for index, token in enumerate(tokens):
+        stripped = re.sub(r"[^A-Za-z0-9]", "", token)
+        if not stripped:
+            normalized_tokens.append(token)
+            continue
+        if stripped.isdigit():
+            normalized_tokens.append(token)
+            continue
+        if stripped.isupper() and 2 <= len(stripped) <= 4:
+            normalized_tokens.append(token.upper())
+            continue
+
+        lowered = token.lower()
+        if index > 0 and lowered in _LOWERCASE_NAME_PARTS:
+            normalized_tokens.append(lowered)
+            continue
+
+        normalized_tokens.append(lowered[:1].upper() + lowered[1:])
+
+    return " ".join(normalized_tokens).strip()
+
+
 def _resolve_display_merchant(clean_name: str, details: dict[str, Any]) -> str:
     merchant = str(clean_name or "").strip()
     counterparty = str(details.get("counterparty") or "").strip()
     payment_method = _normalize_match_text(str(details.get("payment_method") or ""))
     if not merchant:
-        return counterparty
+        return _normalize_display_merchant_name(counterparty)
     if not counterparty:
-        return merchant
+        return _normalize_display_merchant_name(merchant)
 
     merchant_norm = _normalize_match_text(merchant)
     counterparty_norm = _normalize_match_text(counterparty)
@@ -456,16 +530,16 @@ def _resolve_display_merchant(clean_name: str, details: dict[str, Any]) -> str:
         merchant_norm in _GENERIC_MERCHANT_NAMES
         and counterparty_norm not in _GENERIC_MERCHANT_NAMES
     ):
-        return counterparty
+        return _normalize_display_merchant_name(counterparty)
 
     if payment_method:
         if merchant_norm in {
             f"{counterparty_norm} {payment_method}".strip(),
             f"{payment_method} {counterparty_norm}".strip(),
         }:
-            return counterparty
+            return _normalize_display_merchant_name(counterparty)
 
-    return merchant
+    return _normalize_display_merchant_name(merchant)
 
 
 def _extract_counterparty(
@@ -534,6 +608,7 @@ def _extract_tx_details(
         seen_ibans.add(normalized)
         ibans.append(normalized)
     counterparty = _extract_counterparty(original_description, payment_method, structured_fields)
+    paper_name = _field_value(structured_fields, "Naam")
     account = _field_value(structured_fields, "Rekening")
     counter_account = _field_value(structured_fields, "Tegenrekening")
     reference = _field_value(
@@ -545,6 +620,8 @@ def _extract_tx_details(
     transaction_code = _field_value(structured_fields, "Code")
     mutation_type = _field_value(structured_fields, "Mutatiesoort", "Transactie")
     message = _field_value(structured_fields, "Mededelingen")
+    if message.lower().startswith("naam:"):
+        message = _field_value(structured_fields, "Omschrijving") or message
     tag = _field_value(structured_fields, "Tag")
     running_balance = _field_value(structured_fields, "Saldo na mutatie")
     bic = _field_value(structured_fields, "BIC")
@@ -573,6 +650,7 @@ def _extract_tx_details(
         "value_date": value_date,
         "payment_method": payment_method,
         "counterparty": counterparty,
+        "paper_name": paper_name,
         "account": account,
         "counter_account": counter_account,
         "reference": reference,

@@ -13,6 +13,13 @@ logger = logging.getLogger("spectra.local")
 
 # ── Merchant name extraction ─────────────────────────────────────
 
+_NAME_FIELD_RE = re.compile(
+    r"(?i)\bNaam:\s*(?P<name>.+?)(?=(?:\s*\|\s*|\s+(?:Omschrijving|IBAN|Kenmerk|Machtiging ID|Incassant ID|Datum/Tijd|Valutadatum|Overige partij):)|$)"
+)
+_TRAILING_METHOD_RE = re.compile(
+    r"(?i)\b(?:incasso|overschrijving|overboeking|online bankieren|betaalautomaat|kaartbetaling|ideal|iDEAL|diversen)\b$"
+)
+
 _STRIP_PREFIXES = re.compile(
     r"(?i)^(?:"
     # Italian
@@ -174,6 +181,14 @@ def _extract_merchant_name(raw: str) -> str:
     """Extract a clean merchant name from a raw banking description."""
     text = raw.strip()
 
+    # Prefer explicit "Naam: ..." metadata when available.
+    if name_match := _NAME_FIELD_RE.search(text):
+        text = str(name_match.group("name") or "").strip()
+    elif "|" in text:
+        # Metadata-enriched descriptions use `|` separators; the first segment is
+        # usually the best merchant candidate.
+        text = text.split("|", 1)[0].strip()
+
     # Strip banking prefixes
     text = _STRIP_PREFIXES.sub("", text)
 
@@ -186,6 +201,7 @@ def _extract_merchant_name(raw: str) -> str:
     # Collapse whitespace and pipes
     text = re.sub(r"\s*\|\s*", " ", text)
     text = re.sub(r"\s+", " ", text).strip(" .|,;:-*")
+    text = _TRAILING_METHOD_RE.sub("", text).strip(" .|,;:-*")
 
     # Deduplicate repeated words (e.g. "Massaua Ci Massaua Ci Torino" → "Massaua Ci Torino")
     words = text.split()
