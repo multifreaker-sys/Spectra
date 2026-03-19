@@ -5,7 +5,7 @@
 <h1 class="page-title">Upload</h1>
 <p class="page-subtitle">Drag and drop a CSV, PDF, or OFX bank export, then review merchants and categories before saving</p>
 
-<div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+<div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="Upload bank export">
     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
         stroke-linecap="round" stroke-linejoin="round" style="opacity:.4;margin-bottom:12px;">
         <polyline points="16 16 12 12 8 16" />
@@ -176,7 +176,24 @@
         showToast(`Applied review changes to ${updated} similar row(s)`);
     }
 
-    // Drag & drop
+    // Drag & drop + safe click-to-open (avoid bubbling click loops)
+    zone.addEventListener('click', (event) => {
+        if (event.target === fileInput) {
+            return;
+        }
+        fileInput.click();
+    });
+    zone.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+        event.preventDefault();
+        fileInput.click();
+    });
+    fileInput.addEventListener('click', event => {
+        event.stopPropagation();
+    });
+
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
     zone.addEventListener('drop', e => {

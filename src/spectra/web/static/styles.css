@@ -810,6 +810,11 @@ td.amount.income {
     box-shadow: var(--shadow-md);
 }
 
+.upload-zone:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+}
+
 .upload-zone.drag-over {
     border-color: var(--accent);
     background: var(--upload-zone-active);
