@@ -391,3 +391,27 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
     assert row["details"]["value_date"] == "2026-03-12"
     assert "NL11TEST0000000001" in row["details"]["iban_candidates"]
     assert row["details"]["structured_fields"]["Naam"] == "Cafe Test"
+
+
+def test_transactions_use_counterparty_for_generic_merchant_name(
+    client: TestClient,
+    web_settings: Settings,
+) -> None:
+    with BookmarkDB(web_settings.db_path) as db:
+        seed_tx(
+            db,
+            tx_id="tx-incasso-counterparty",
+            tx_date="2026-03-11",
+            merchant="Incasso",
+            amount=-7.5,
+            category="Education",
+            original_description="Consumentenbond Incasso",
+        )
+
+    response = client.get("/api/transactions?search=consumentenbond")
+    assert response.status_code == 200
+    payload = response.json()
+    row = next(item for item in payload["transactions"] if item["id"] == "tx-incasso-counterparty")
+    assert row["merchant"] == "Consumentenbond"
+    assert row["details"]["payment_method"] == "Incasso"
+    assert row["details"]["counterparty"] == "Consumentenbond"

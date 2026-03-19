@@ -94,6 +94,25 @@ _LABEL_CAPTURE_RE = re.compile(
     + r"):|$)",
     re.IGNORECASE | re.DOTALL,
 )
+_GENERIC_MERCHANT_NAMES = {
+    "incasso",
+    "overschrijving",
+    "overboeking",
+    "bankoverschrijving",
+    "online bankieren",
+    "betaalautomaat",
+    "kaartbetaling",
+    "betaling",
+    "ideal",
+    "i deal",
+    "diversen",
+    "sepa",
+    "debit",
+    "credit",
+    "transfer",
+    "betaling pin",
+    "pin",
+}
 
 
 # ── Global error handler ─────────────────────────────────────────
@@ -408,6 +427,37 @@ def _field_value(fields: dict[str, str], *labels: str) -> str:
         if value:
             return value
     return ""
+
+
+def _normalize_match_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _resolve_display_merchant(clean_name: str, details: dict[str, Any]) -> str:
+    merchant = str(clean_name or "").strip()
+    counterparty = str(details.get("counterparty") or "").strip()
+    payment_method = _normalize_match_text(str(details.get("payment_method") or ""))
+    if not merchant:
+        return counterparty
+    if not counterparty:
+        return merchant
+
+    merchant_norm = _normalize_match_text(merchant)
+    counterparty_norm = _normalize_match_text(counterparty)
+    if (
+        merchant_norm in _GENERIC_MERCHANT_NAMES
+        and counterparty_norm not in _GENERIC_MERCHANT_NAMES
+    ):
+        return counterparty
+
+    if payment_method:
+        if merchant_norm in {
+            f"{counterparty_norm} {payment_method}".strip(),
+            f"{payment_method} {counterparty_norm}".strip(),
+        }:
+            return counterparty
+
+    return merchant
 
 
 def _extract_counterparty(
@@ -1006,8 +1056,6 @@ async def api_transactions(
             continue
         if uncategorized_only and cat != "Uncategorized":
             continue
-        if search and search.lower() not in clean_name.lower():
-            continue
         if date_from and date < date_from:
             continue
         if date_to and date > date_to:
@@ -1017,11 +1065,24 @@ async def api_transactions(
             date_value=str(date),
             original_description=str(original_description or ""),
         )
+        merchant = _resolve_display_merchant(str(clean_name or ""), details)
+        if search:
+            needle = str(search).strip().lower()
+            haystack = " ".join(
+                [
+                    str(clean_name or ""),
+                    merchant,
+                    str(details.get("counterparty") or ""),
+                    str(original_description or ""),
+                ]
+            ).lower()
+            if needle not in haystack:
+                continue
         results.append({
             "id": tx_id,
             "date": date,
             "booking_time": str(details.get("booking_time") or ""),
-            "merchant": clean_name,
+            "merchant": merchant,
             "category": cat,
             "amount": amount,
             "details": details,
