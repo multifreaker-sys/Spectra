@@ -56,6 +56,32 @@ _DATE_TIME_WITH_SEPARATOR = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})[T\s](?P<time>\d{2}:\d{2})(?::\d{2})?"
 )
 _TIME_IN_TEXT = re.compile(r"\b(?P<h>[01]?\d|2[0-3])[:.](?P<m>[0-5]\d)\b")
+_VALUE_DATE_RE = re.compile(r"\bValutadatum:\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})", re.IGNORECASE)
+_DATUM_TIJD_RE = re.compile(
+    r"\bDatum/Tijd:\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\s+(\d{1,2}:\d{2}(?::\d{2})?)",
+    re.IGNORECASE,
+)
+_IBAN_RE = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b")
+_KNOWN_METADATA_LABELS = [
+    "Naam",
+    "Omschrijving",
+    "IBAN",
+    "Kenmerk",
+    "Machtiging ID",
+    "Incassant ID",
+    "Overige partij",
+    "Pasvolgnr",
+    "Transactie",
+    "Term",
+]
+_LABEL_CAPTURE_RE = re.compile(
+    r"(?P<label>"
+    + "|".join(re.escape(label) for label in _KNOWN_METADATA_LABELS)
+    + r"):\s*(?P<value>.*?)(?=\s+(?:"
+    + "|".join(re.escape(label) for label in _KNOWN_METADATA_LABELS)
+    + r"):|$)",
+    re.IGNORECASE,
+)
 
 
 # ── Global error handler ─────────────────────────────────────────
@@ -287,6 +313,90 @@ def _extract_booking_time(date_value: str, original_description: str = "") -> st
     hour = int(match.group("h"))
     minute = int(match.group("m"))
     return f"{hour:02d}:{minute:02d}"
+
+
+def _extract_value_date(original_description: str) -> str:
+    text = str(original_description or "")
+    match = _VALUE_DATE_RE.search(text)
+    if not match:
+        return ""
+
+    raw_date = str(match.group(1))
+    from datetime import datetime
+
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(raw_date, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return raw_date
+
+
+def _normalize_label(label: str) -> str:
+    canonical = {
+        "naam": "Naam",
+        "omschrijving": "Omschrijving",
+        "iban": "IBAN",
+        "kenmerk": "Kenmerk",
+        "machtiging id": "Machtiging ID",
+        "incassant id": "Incassant ID",
+        "overige partij": "Overige partij",
+        "pasvolgnr": "Pasvolgnr",
+        "transactie": "Transactie",
+        "term": "Term",
+    }
+    normalized = str(label or "").strip().lower()
+    return canonical.get(normalized, str(label).strip())
+
+
+def _extract_structured_fields(original_description: str) -> dict[str, str]:
+    text = str(original_description or "")
+    fields: dict[str, str] = {}
+    for match in _LABEL_CAPTURE_RE.finditer(text):
+        label = _normalize_label(match.group("label"))
+        value = re.sub(r"\s+", " ", str(match.group("value") or "")).strip()
+        if not value:
+            continue
+        fields[label] = value
+    return fields
+
+
+def _infer_payment_method(original_description: str) -> str:
+    text = str(original_description or "").lower()
+    if "betaalautomaat" in text or "apple pay" in text or "google pay" in text:
+        return "Kaartbetaling"
+    if "ideal" in text:
+        return "iDEAL"
+    if "incasso" in text:
+        return "Incasso"
+    if "overschrijving" in text:
+        return "Overschrijving"
+    if "online bankieren" in text:
+        return "Online bankieren"
+    if "diversen" in text:
+        return "Diversen"
+    return ""
+
+
+def _extract_tx_details(
+    *,
+    date_value: str,
+    original_description: str,
+) -> dict[str, Any]:
+    booking_time = _extract_booking_time(date_value, original_description)
+    value_date = _extract_value_date(original_description)
+    payment_method = _infer_payment_method(original_description)
+    structured_fields = _extract_structured_fields(original_description)
+    ibans = _IBAN_RE.findall(str(original_description or ""))
+
+    return {
+        "booking_time": booking_time,
+        "value_date": value_date,
+        "payment_method": payment_method,
+        "iban_candidates": ibans[:3],
+        "structured_fields": structured_fields,
+        "original_description": str(original_description or ""),
+    }
 
 
 def _persist_learning(
@@ -796,16 +906,18 @@ async def api_transactions(
         if date_to and date > date_to:
             continue
 
+        details = _extract_tx_details(
+            date_value=str(date),
+            original_description=str(original_description or ""),
+        )
         results.append({
             "id": tx_id,
             "date": date,
-            "booking_time": _extract_booking_time(
-                str(date),
-                str(original_description or ""),
-            ),
+            "booking_time": str(details.get("booking_time") or ""),
             "merchant": clean_name,
             "category": cat,
             "amount": amount,
+            "details": details,
         })
 
     total = len(results)

@@ -319,7 +319,11 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
             merchant="Cafe Test",
             amount=-8.5,
             category="Food & Dining",
-            original_description="POS payment 14:37 cafe",
+            original_description=(
+                "Online bankieren Naam: Cafe Test Omschrijving: Lunch "
+                "IBAN: NL11TEST0000000001 Datum/Tijd: 12-03-2026 14:37:12 "
+                "Valutadatum: 12-03-2026"
+            ),
         )
 
     response = client.get("/api/transactions")
@@ -327,3 +331,7 @@ def test_transactions_include_booking_time_hint(client: TestClient, web_settings
     payload = response.json()
     row = next(item for item in payload["transactions"] if item["id"] == "tx-time-hint")
     assert row["booking_time"] == "14:37"
+    assert row["details"]["payment_method"] == "Online bankieren"
+    assert row["details"]["value_date"] == "2026-03-12"
+    assert "NL11TEST0000000001" in row["details"]["iban_candidates"]
+    assert row["details"]["structured_fields"]["Naam"] == "Cafe Test"

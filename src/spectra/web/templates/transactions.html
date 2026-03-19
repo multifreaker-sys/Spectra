@@ -81,6 +81,89 @@
         `;
     }
 
+    function detailRowId(txId) {
+        const safe = String(txId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+        return `tx-detail-${safe}`;
+    }
+
+    function detailRowsFromTx(tx) {
+        const details = tx.details || {};
+        const rows = [];
+        const push = (label, value) => {
+            if (value === null || value === undefined) return;
+            const text = String(value).trim();
+            if (!text) return;
+            rows.push({ label, value: text });
+        };
+
+        push('Boekingstijd', details.booking_time || tx.booking_time);
+        push('Valutadatum', details.value_date);
+        push('Betaalmethode', details.payment_method);
+
+        const ibans = Array.isArray(details.iban_candidates) ? details.iban_candidates.filter(Boolean).slice(0, 3) : [];
+        if (ibans.length) {
+            push('IBAN(s)', ibans.join(', '));
+        }
+
+        const structured = details.structured_fields && typeof details.structured_fields === 'object'
+            ? details.structured_fields
+            : {};
+        Object.entries(structured).forEach(([key, value]) => {
+            push(key, value);
+        });
+
+        return rows;
+    }
+
+    function renderTxDetailsPanel(tx) {
+        const detailRows = detailRowsFromTx(tx);
+        const description = String(tx.details?.original_description || '').trim();
+
+        if (!detailRows.length && !description) {
+            return `<div class="tx-details-empty">Geen extra metadata beschikbaar voor deze boeking.</div>`;
+        }
+
+        const rowsHtml = detailRows.map(item => `
+            <div class="tx-detail-item">
+                <span class="tx-detail-label">${escapeHtml(item.label)}</span>
+                <span class="tx-detail-value">${escapeHtml(item.value)}</span>
+            </div>
+        `).join('');
+
+        const rawHtml = description
+            ? `<div class="tx-detail-raw"><span class="tx-detail-label">Ruwe omschrijving</span><span class="tx-detail-value">${escapeHtml(description)}</span></div>`
+            : '';
+
+        return `
+            <div class="tx-details-panel">
+                <div class="tx-details-grid">
+                    ${rowsHtml}
+                </div>
+                ${rawHtml}
+            </div>
+        `;
+    }
+
+    function toggleTxDetails(event, rowEl) {
+        const interactiveTarget = event.target.closest('input, select, button, .editable, .badge, .quick-category-wrap, label, a');
+        if (interactiveTarget) {
+            return;
+        }
+
+        const detailId = rowEl?.dataset?.detailId;
+        if (!detailId) {
+            return;
+        }
+        const detailRow = document.getElementById(detailId);
+        if (!detailRow) {
+            return;
+        }
+
+        const isOpen = rowEl.classList.contains('expanded');
+        rowEl.classList.toggle('expanded', !isOpen);
+        detailRow.hidden = isOpen;
+    }
+
     async function loadCategories() {
         const res = await fetch('/api/categories');
         const data = await res.json();
@@ -165,6 +248,7 @@
             const amountClass = isExpense ? 'expense' : 'income';
             const isUncategorized = t.category === 'Uncategorized';
             const badgeClass = isUncategorized ? 'badge badge-uncategorized' : 'badge';
+            const detailId = detailRowId(t.id);
             const dotColor = isUncategorized ? '' : `background:${getCategoryColor(t.category)}`;
             const checkbox = isUncategorized
                 ? `<input type="checkbox" class="uncategorized-check" value="${t.id}" aria-label="Select transaction">`
@@ -178,7 +262,7 @@
                 </div>`
                 : '';
 
-            html += `<tr>
+            html += `<tr class="tx-main-row" data-detail-id="${detailId}" onclick="toggleTxDetails(event, this)">
             <td>${checkbox}</td>
             <td>${formatBookingDateCell(t)}</td>
             <td>
@@ -193,6 +277,11 @@
             </td>
             <td class="amount ${amountClass}" style="text-align:right">${formatCurrency(t.amount)}</td>
         </tr>`;
+            html += `
+                <tr class="tx-detail-row" id="${detailId}" hidden>
+                    <td colspan="5">${renderTxDetailsPanel(t)}</td>
+                </tr>
+            `;
         }
 
         html += '</tbody></table>';

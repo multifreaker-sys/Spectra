@@ -655,6 +655,66 @@ td.amount.income {
     letter-spacing: 0.01em;
 }
 
+.tx-main-row {
+    cursor: pointer;
+}
+
+.tx-main-row.expanded td {
+    background: var(--bg-hover);
+}
+
+.tx-detail-row td {
+    padding-top: 6px;
+    padding-bottom: 14px;
+    background: transparent;
+}
+
+.tx-details-panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-subtle);
+    padding: 10px 12px;
+}
+
+.tx-details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px 14px;
+}
+
+.tx-detail-item,
+.tx-detail-raw {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tx-detail-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.tx-detail-value {
+    font-size: 12px;
+    color: var(--text);
+    word-break: break-word;
+}
+
+.tx-detail-raw {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-light);
+}
+
+.tx-details-empty {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 6px 2px;
+}
+
 .cadence-badge {
     display: inline-flex;
     align-items: center;
